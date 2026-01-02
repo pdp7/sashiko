@@ -2,8 +2,10 @@ use crate::db::Database;
 use crate::events::Event;
 use crate::nntp::NntpClient;
 use crate::settings::{IngestionMode, Settings};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use std::process::Stdio;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::Sender;
 use tokio::time::{Duration, sleep};
@@ -105,7 +107,8 @@ impl Ingestor {
             archive_settings.path
         );
 
-        // Get list of all blob hashes in the repo (each blob is an email)
+        // 1. Get list of all object SHAs
+        info!("Listing git objects...");
         let output = Command::new("git")
             .arg("-c")
             .arg("safe.bareRepository=all")
@@ -124,76 +127,99 @@ impl Ingestor {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let shas: Vec<String> = stdout
+            .lines()
+            .filter_map(|line| line.split_whitespace().next().map(|s| s.to_string()))
+            .collect();
+
+        info!("Found {} objects. Starting batch processing...", shas.len());
+
+        // 2. Start git cat-file --batch
+        let mut child = Command::new("git")
+            .arg("-c")
+            .arg("safe.bareRepository=all")
+            .current_dir(&archive_settings.path)
+            .arg("cat-file")
+            .arg("--batch")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdin for git cat-file"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdout for git cat-file"))?;
+        let mut reader = BufReader::new(stdout);
+
         let mut count = 0;
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.is_empty() {
-                continue;
-            }
-            let hash = parts[0];
+        let mut processed_blobs = 0;
 
-            // Check if it's a blob
-            let cat_type = Command::new("git")
-                .arg("-c")
-                .arg("safe.bareRepository=all")
-                .current_dir(&archive_settings.path)
-                .arg("cat-file")
-                .arg("-t")
-                .arg(hash)
-                .output()
-                .await?;
+        // We process in a loop. To avoid deadlock, we could spawn a writer task, 
+        // or just write one SHA, read result, write next... (synchronous sequential)
+        // Sequential is safest and simplest here.
 
-            if !cat_type.status.success()
-                || String::from_utf8_lossy(&cat_type.stdout).trim() != "blob"
-            {
-                continue;
+        for hash in shas {
+            // Write SHA to stdin
+            stdin.write_all(format!("{}\n", hash).as_bytes()).await?;
+            stdin.flush().await?;
+
+            // Read header: <sha> <type> <size>
+            let mut header = String::new();
+            if reader.read_line(&mut header).await? == 0 {
+                break; // EOF
             }
 
-            // Extract the blob content
-            let content_output = Command::new("git")
-                .arg("-c")
-                .arg("safe.bareRepository=all")
-                .current_dir(&archive_settings.path)
-                .arg("cat-file")
-                .arg("-p")
-                .arg(hash)
-                .output()
-                .await?;
+            let parts: Vec<&str> = header.split_whitespace().collect();
+            if parts.len() < 3 {
+                warn!("Invalid batch header for {}: {}", hash, header);
+                continue;
+            }
 
-            if content_output.status.success() {
-                let raw = content_output.stdout;
+            let obj_type = parts[1];
+            let size: usize = parts[2].parse().unwrap_or(0);
+
+            // Read content + newline
+            let mut content = vec![0u8; size];
+            reader.read_exact(&mut content).await?;
+            
+            // Consume the trailing newline that --batch outputs
+            let mut newline = [0u8; 1];
+            reader.read_exact(&mut newline).await?;
+
+            if obj_type == "blob" {
                 // Convert raw to lines for the 'content' field (legacy)
-                let content_str = String::from_utf8_lossy(&raw);
+                let content_str = String::from_utf8_lossy(&content);
                 let lines: Vec<String> = content_str.lines().map(|s| s.to_string()).collect();
 
                 self.sender
                     .send(Event::ArticleFetched {
                         group: "local-archive".to_string(),
-                        article_id: hash.to_string(),
+                        article_id: hash.clone(),
                         content: lines,
-                        raw: Some(raw),
+                        raw: Some(content),
                     })
                     .await?;
 
-                count += 1;
-                if count % 100 == 0 {
-                    info!("Processed {} emails from archive", count);
+                processed_blobs += 1;
+                if processed_blobs % 1000 == 0 {
+                    info!("Processed {} blobs", processed_blobs);
                 }
-
-                // For testing, stop after 20,000 emails
-                if count >= 20000 {
-                    break;
-                }
-            } else {
-                warn!(
-                    "Failed to cat blob {}: {}",
-                    hash,
-                    String::from_utf8_lossy(&content_output.stderr)
-                );
             }
+
+            count += 1;
+            // if count % 5000 == 0 {
+            //     info!("Scanned {}/{} objects...", count, shas.len());
+            // }
         }
 
-        info!("Local archive ingestion completed. Total: {}", count);
+        info!(
+            "Local archive ingestion completed. Scanned {} objects, processed {} blobs.",
+            count, processed_blobs
+        );
         Ok(())
     }
 }
