@@ -7,7 +7,7 @@
 - [x] Set up libSQL/Turso schema for mailing lists and patchsets.
 - [x] Implement internal task queue (tokio channels).
 - [x] Implement article state tracking (high-water mark).
-- [ ] Set up structured logging (`tracing`) and observability baseline.
+- [x] Set up structured logging (`tracing`) and observability baseline.
 
 ## Phase 2: Git Ops & Patch Processing
 - [ ] Implement Patch/Patchset parsing from raw emails.
