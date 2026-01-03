@@ -79,6 +79,53 @@ impl Database {
         Ok(())
     }
 
+    pub async fn create_patchset(
+        &self,
+        message_id: &str,
+        subject: &str,
+        author: &str,
+        date: i64,
+        total_parts: u32,
+    ) -> Result<i64> {
+        self.conn
+            .execute(
+                "INSERT INTO patchsets (message_id, subject, author, date, total_parts, received_parts, status) VALUES (?, ?, ?, ?, ?, 1, 'Pending') ON CONFLICT(message_id) DO UPDATE SET received_parts = received_parts + 1",
+                libsql::params![message_id, subject, author, date, total_parts],
+            )
+            .await?;
+
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id FROM patchsets WHERE message_id = ?",
+                libsql::params![message_id],
+            )
+            .await?;
+        if let Ok(Some(row)) = rows.next().await {
+            let id: i64 = row.get(0)?;
+            Ok(id)
+        } else {
+            Err(anyhow::anyhow!(
+                "Failed to retrieve patchset ID after insert"
+            ))
+        }
+    }
+
+    pub async fn create_patch(
+        &self,
+        patchset_id: i64,
+        message_id: &str,
+        part_index: u32,
+        body: &str,
+        diff: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO patches (patchset_id, message_id, part_index, body, diff) VALUES (?, ?, ?, ?, ?)",
+            libsql::params![patchset_id, message_id, part_index, body, diff]
+        ).await?;
+        Ok(())
+    }
+
     pub async fn get_patchsets(&self, limit: Option<i32>) -> Result<Vec<PatchsetRow>> {
         let mut rows = if let Some(l) = limit {
             self.conn

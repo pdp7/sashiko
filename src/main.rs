@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = mpsc::channel::<Event>(100);
 
     // Spawn Worker (Placeholder)
-
+    let worker_db = db.clone();
     tokio::spawn(async move {
         info!("Worker started");
 
@@ -71,21 +71,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match event {
                 Event::ArticleFetched {
                     group,
-
                     article_id,
-
                     content,
-
                     raw,
                 } => {
                     let raw_bytes = match raw {
                         Some(b) => b,
-
                         None => content.join("\n").into_bytes(),
                     };
 
                     match crate::patch::parse_email(&raw_bytes) {
-                        Ok((metadata, _)) => {
+                        Ok((metadata, patch_opt)) => {
                             let subject = if metadata.subject.len() > 80 {
                                 format!("{}...", &metadata.subject[..77])
                             } else {
@@ -96,6 +92,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "Article: group={}, id={}, author={}, subject=\"{}\"",
                                 group, article_id, metadata.author, subject
                             );
+
+                            match worker_db
+                                .create_patchset(
+                                    &metadata.message_id,
+                                    &metadata.subject,
+                                    &metadata.author,
+                                    metadata.date,
+                                    metadata.total,
+                                )
+                                .await
+                            {
+                                Ok(patchset_id) => {
+                                    if let Some(patch) = patch_opt {
+                                        if let Err(e) = worker_db
+                                            .create_patch(
+                                                patchset_id,
+                                                &patch.message_id,
+                                                patch.part_index,
+                                                &patch.body,
+                                                &patch.diff,
+                                            )
+                                            .await
+                                        {
+                                            error!("Failed to save patch: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to save patchset: {}", e);
+                                }
+                            }
                         }
 
                         Err(e) => {
