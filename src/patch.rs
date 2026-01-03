@@ -40,7 +40,15 @@ pub fn parse_email(raw_email: &[u8]) -> Result<(PatchsetMetadata, Option<Patch>)
     let author = message
         .from()
         .and_then(|addr| addr.first())
-        .map(|a| a.address().unwrap_or("unknown").to_string())
+        .map(|a| {
+            let name = a.name().unwrap_or_default();
+            let address = a.address().unwrap_or("unknown");
+            if name.is_empty() {
+                address.to_string()
+            } else {
+                format!("{} <{}>", name, address)
+            }
+        })
         .unwrap_or_else(|| "unknown".to_string());
 
     let date = message.date().map(|d| d.to_timestamp()).unwrap_or(0);

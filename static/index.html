@@ -13,6 +13,8 @@
         .status-Pending { color: orange; }
         .status-Applied { color: green; }
         .status-Failed { color: red; }
+        .copy-btn { cursor: pointer; border: 1px solid #ccc; background: #fff; padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+        .copy-btn:hover { background: #eee; }
     </style>
 </head>
 <body>
@@ -21,7 +23,7 @@
     <table id="patchsets">
         <thead>
             <tr>
-                <th>ID</th>
+                <th>Msg ID</th>
                 <th>Subject</th>
                 <th>Author</th>
                 <th>Date</th>
@@ -40,6 +42,13 @@
             document.getElementById('stats').textContent = `System Status: ${data.status} (v${data.version})`;
         }
 
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Optional: show some feedback
+                console.log('Copied to clipboard:', text);
+            });
+        }
+
         async function fetchPatchsets() {
             const res = await fetch('/api/patchsets');
             const data = await res.json();
@@ -49,7 +58,7 @@
                 const row = document.createElement('tr');
                 const date = new Date(p.date * 1000).toISOString().split('T')[0];
                 row.innerHTML = `
-                    <td>${p.id}</td>
+                    <td><button class="copy-btn" onclick="copyToClipboard('${p.message_id}')" title="${p.message_id}">copy</button></td>
                     <td>${p.subject || '(no subject)'}</td>
                     <td>${p.author || 'unknown'}</td>
                     <td>${date}</td>
