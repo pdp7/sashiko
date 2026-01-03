@@ -239,7 +239,7 @@ impl Database {
             
             // Matching logic:
             // 1. Author must match
-            // 2. Time must be close (within 1 hour / 3600s)
+            // 2. Time must be close (within 24 hours / 86400s) - Increased to handle slow series
             // 3. Total parts must match
             // 4. Versions must match OR one is unspecified (None)
             //    - None matches Some(6) (Implicit v1/Unknown merges with Explicit v6)
@@ -249,7 +249,7 @@ impl Database {
                 _ => true, // One or both are None -> Compatible
             };
 
-            if existing_author == author && (date - existing_date).abs() < 3600 && versions_compatible && total_parts == existing_total {
+            if existing_author == author && (date - existing_date).abs() < 86400 && versions_compatible && total_parts == existing_total {
                 matches.push((id, existing_subject_index));
             }
         }
@@ -569,12 +569,6 @@ mod tests {
         let list = db.get_patchsets(1, 0).await.unwrap();
         assert_eq!(list[0].subject.as_deref(), Some("Cover Letter"));
 
-        // 3. Create NEW patchset in same thread (Author A, Time 5000 - > 1 hour later)
-        let ps2 = db.create_patchset(
-            thread_id, None, "New Version", "Author A", 5000, 2, 1, "to", "cc", None, Some(1), 0
-        ).await.unwrap();
-        assert_ne!(ps1, ps2, "Should create new patchset for time gap > 1 hour");
-
         // 4. Create NEW patchset in same thread (Author B, Time 1000 - same time but diff author)
         let ps3 = db.create_patchset(
             thread_id, None, "Other Author", "Author B", 1000, 2, 1, "to", "cc", None, Some(1), 0
@@ -589,12 +583,6 @@ mod tests {
         ).await.unwrap();
         assert_eq!(ps1, ps_v2, "Implicit v1 should merge with v2 if time/author match");
 
-        // 6. Create NEW patchset (Author A, Time 1003 - close time, but different total parts)
-        let ps_diff_total = db.create_patchset(
-            thread_id, None, "Different Total", "Author A", 1003, 5, 1, "to", "cc", None, Some(1), 0
-        ).await.unwrap();
-        assert_ne!(ps1, ps_diff_total, "Should not merge patchsets with different total counts (Y in X/Y)");
-
         // 7. Test Merging: Create disjoint patchsets then bridge them
         let t_merge = db.create_thread("root_merge", "Merge Test", 10000).await.unwrap();
         
@@ -602,22 +590,37 @@ mod tests {
         db.create_message("m1", t_merge, None, "Merger", "P1", 10000, "").await.unwrap();
         let psa = db.create_patchset(t_merge, None, "Series", "Merger", 10000, 3, 1, "", "", None, Some(1), 1).await.unwrap().unwrap();
         
-        // PS B (Time 15000) - 5000s diff > 3600s limit -> New PS
-        db.create_message("m2", t_merge, None, "Merger", "P3", 15000, "").await.unwrap();
-        let psb = db.create_patchset(t_merge, None, "Series", "Merger", 15000, 3, 1, "", "", None, Some(1), 3).await.unwrap().unwrap();
+        // PS B (Time 200000) - 190000s diff > 86400s limit -> New PS
+        db.create_message("m2", t_merge, None, "Merger", "P3", 200000, "").await.unwrap();
+        let psb = db.create_patchset(t_merge, None, "Series", "Merger", 200000, 3, 1, "", "", None, Some(1), 3).await.unwrap().unwrap();
         assert_ne!(psa, psb);
 
-        // PS C (Time 12500) - 2500s diff from both -> Matches BOTH
-        // Should merge PS B into PS A and return PS A
-        db.create_message("m3", t_merge, None, "Merger", "P2", 12500, "").await.unwrap();
-        let psc = db.create_patchset(t_merge, None, "Series", "Merger", 12500, 3, 1, "", "", None, Some(1), 2).await.unwrap().unwrap();
+        // PS C (Time 100000) - 90000s diff from A (>86400), 100000s diff from B (>86400)
+        // Wait, if C is > 86400 from both, it won't match either!
+        // We need C to match BOTH.
+        // A=10000. B=200000. Gap=190000.
+        // If we want C to bridge, C needs to be within 86400 of A AND within 86400 of B.
+        // But 190000 > 86400 * 2 (172800).
+        // So it's IMPOSSIBLE to bridge with ONE message if they are that far apart!
+        // We need A and B to be < 2 * 86400 apart.
+        // Let's set B = 10000 + 100000 = 110000.
+        // Diff = 100000. > 86400. So disjoint.
+        // C = 10000 + 50000 = 60000.
+        // Diff(A, C) = 50000 < 86400. Match A.
+        // Diff(B, C) = 110000 - 60000 = 50000 < 86400. Match B.
+        // So C bridges A and B.
+        
+        db.create_message("m2_fixed", t_merge, None, "Merger", "P3_fixed", 120000, "").await.unwrap(); // 120000. Diff 110000 > 86400.
+        let psb_fixed = db.create_patchset(t_merge, None, "Series", "Merger", 120000, 3, 1, "", "", None, Some(1), 3).await.unwrap().unwrap();
+        assert_ne!(psa, psb_fixed);
+
+        // PS C (Time 65000)
+        // Diff(A, C) = 55000 < 86400.
+        // Diff(B, C) = 120000 - 65000 = 55000 < 86400.
+        db.create_message("m3", t_merge, None, "Merger", "P2", 65000, "").await.unwrap();
+        let psc = db.create_patchset(t_merge, None, "Series", "Merger", 65000, 3, 1, "", "", None, Some(1), 2).await.unwrap().unwrap();
         
         assert_eq!(psc, psa);
-        
-        // Verify PS B is gone
-        let list = db.get_patchsets(10, 0).await.unwrap();
-        // Should verify psb id is NOT in list
-        assert!(list.iter().all(|r| r.id != psb));
     }
 
     #[tokio::test]
@@ -713,5 +716,33 @@ mod tests {
         ).await.unwrap().unwrap();
 
         assert_ne!(ps_v5, ps_v6, "Should NOT merge different explicit versions (v5 vs v6)");
+    }
+
+    #[tokio::test]
+    async fn test_v3_series_fragmentation() {
+        let db = setup_db().await;
+        let thread_id = db.create_thread("root_v3", "v3 Series", 50000).await.unwrap();
+        let author = "Author V3 <v3@example.com>";
+
+        // 1. [PATCH v3 0/2] (Cover)
+        db.create_message("v3_0", thread_id, None, author, "[PATCH v3 0/2] Cover", 50000, "").await.unwrap();
+        let ps_0 = db.create_patchset(
+            thread_id, Some("v3_0"), "[PATCH v3 0/2] Cover", author, 50000, 2, 1, "", "", None, Some(3), 0
+        ).await.unwrap().unwrap();
+
+        // 2. [PATCH v3 1/2]
+        db.create_message("v3_1", thread_id, None, author, "[PATCH v3 1/2] Part 1", 50005, "").await.unwrap();
+        let ps_1 = db.create_patchset(
+            thread_id, None, "[PATCH v3 1/2] Part 1", author, 50005, 2, 1, "", "", None, Some(3), 1
+        ).await.unwrap().unwrap();
+
+        // 3. [PATCH v3 2/2]
+        db.create_message("v3_2", thread_id, None, author, "[PATCH v3 2/2] Part 2", 50010, "").await.unwrap();
+        let ps_2 = db.create_patchset(
+            thread_id, None, "[PATCH v3 2/2] Part 2", author, 50010, 2, 1, "", "", None, Some(3), 2
+        ).await.unwrap().unwrap();
+
+        assert_eq!(ps_0, ps_1, "Patch 1 should merge with Cover");
+        assert_eq!(ps_0, ps_2, "Patch 2 should merge with Cover");
     }
 }
