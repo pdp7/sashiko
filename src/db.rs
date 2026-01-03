@@ -212,7 +212,7 @@ impl Database {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, date, author, subject, subject_index FROM patchsets WHERE thread_id = ?",
+                "SELECT id, date, author, subject, subject_index, total_parts FROM patchsets WHERE thread_id = ?",
                 libsql::params![thread_id],
             )
             .await?;
@@ -228,6 +228,7 @@ impl Database {
             let existing_author: String = row.get(2)?;
             let existing_subject: String = row.get(3)?;
             let existing_subject_index: u32 = row.get(4).unwrap_or(9999);
+            let existing_total: u32 = row.get(5).unwrap_or(1);
 
             if existing_author == author {
                 author_exists_in_thread = true;
@@ -241,9 +242,10 @@ impl Database {
 
             // Matching logic:
             // 1. Author must match
-            // 2. Time must be close (within 15 mins / 900s)
+            // 2. Time must be close (within 1 hour / 3600s)
             // 3. Versions must match
-            if existing_author == author && (date - existing_date).abs() < 900 && v_new == v_old {
+            // 4. Total parts must match (the Y in X/Y)
+            if existing_author == author && (date - existing_date).abs() < 3600 && v_new == v_old && total_parts == existing_total {
                 matches.push((id, existing_subject_index));
             }
         }
@@ -563,40 +565,46 @@ mod tests {
         let list = db.get_patchsets(1, 0).await.unwrap();
         assert_eq!(list[0].subject.as_deref(), Some("Cover Letter"));
 
-        // 4. Create NEW patchset in same thread (Author A, Time 2000 - > 15 mins later)
+        // 3. Create NEW patchset in same thread (Author A, Time 5000 - > 1 hour later)
         let ps2 = db.create_patchset(
-            thread_id, None, "New Version", "Author A", 2000, 2, 1, "to", "cc", None, Some(1), 0
+            thread_id, None, "New Version", "Author A", 5000, 2, 1, "to", "cc", None, Some(1), 0
         ).await.unwrap();
-        assert_ne!(ps1, ps2);
+        assert_ne!(ps1, ps2, "Should create new patchset for time gap > 1 hour");
 
-        // 5. Create NEW patchset in same thread (Author B, Time 1000 - same time but diff author)
+        // 4. Create NEW patchset in same thread (Author B, Time 1000 - same time but diff author)
         let ps3 = db.create_patchset(
             thread_id, None, "Other Author", "Author B", 1000, 2, 1, "to", "cc", None, Some(1), 0
         ).await.unwrap();
         assert!(ps3.is_none());
 
-        // 6. Create NEW patchset v2 (Author A, Time 1002 - close time, but v2)
+        // 5. Create NEW patchset v2 (Author A, Time 1002 - close time, but v2)
         let ps_v2 = db.create_patchset(
             thread_id, None, "[PATCH v2] Patchset 1", "Author A", 1002, 2, 1, "to", "cc", None, Some(2), 0
         ).await.unwrap();
         assert_ne!(ps1, ps_v2);
 
+        // 6. Create NEW patchset (Author A, Time 1003 - close time, but different total parts)
+        let ps_diff_total = db.create_patchset(
+            thread_id, None, "Different Total", "Author A", 1003, 5, 1, "to", "cc", None, Some(1), 0
+        ).await.unwrap();
+        assert_ne!(ps1, ps_diff_total, "Should not merge patchsets with different total counts (Y in X/Y)");
+
         // 7. Test Merging: Create disjoint patchsets then bridge them
-        let t_merge = db.create_thread("root_merge", "Merge Test", 5000).await.unwrap();
+        let t_merge = db.create_thread("root_merge", "Merge Test", 10000).await.unwrap();
         
-        // PS A (Time 5000)
-        db.create_message("m1", t_merge, None, "Merger", "P1", 5000, "").await.unwrap();
-        let psa = db.create_patchset(t_merge, None, "Series", "Merger", 5000, 3, 1, "", "", None, Some(1), 1).await.unwrap().unwrap();
+        // PS A (Time 10000)
+        db.create_message("m1", t_merge, None, "Merger", "P1", 10000, "").await.unwrap();
+        let psa = db.create_patchset(t_merge, None, "Series", "Merger", 10000, 3, 1, "", "", None, Some(1), 1).await.unwrap().unwrap();
         
-        // PS B (Time 6000) - 1000s diff > 900s limit -> New PS
-        db.create_message("m2", t_merge, None, "Merger", "P3", 6000, "").await.unwrap();
-        let psb = db.create_patchset(t_merge, None, "Series", "Merger", 6000, 3, 1, "", "", None, Some(1), 3).await.unwrap().unwrap();
+        // PS B (Time 15000) - 5000s diff > 3600s limit -> New PS
+        db.create_message("m2", t_merge, None, "Merger", "P3", 15000, "").await.unwrap();
+        let psb = db.create_patchset(t_merge, None, "Series", "Merger", 15000, 3, 1, "", "", None, Some(1), 3).await.unwrap().unwrap();
         assert_ne!(psa, psb);
 
-        // PS C (Time 5500) - 500s diff from both -> Matches BOTH
+        // PS C (Time 12500) - 2500s diff from both -> Matches BOTH
         // Should merge PS B into PS A and return PS A
-        db.create_message("m3", t_merge, None, "Merger", "P2", 5500, "").await.unwrap();
-        let psc = db.create_patchset(t_merge, None, "Series", "Merger", 5500, 3, 1, "", "", None, Some(1), 2).await.unwrap().unwrap();
+        db.create_message("m3", t_merge, None, "Merger", "P2", 12500, "").await.unwrap();
+        let psc = db.create_patchset(t_merge, None, "Series", "Merger", 12500, 3, 1, "", "", None, Some(1), 2).await.unwrap().unwrap();
         
         assert_eq!(psc, psa);
         
