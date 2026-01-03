@@ -204,7 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     )
                                     .await
                                 {
-                                    Ok(patchset_id) => {
+                                    Ok(Some(patchset_id)) => {
                                         if let Some(patch) = patch_opt {
                                             if let Err(e) = worker_db
                                                 .create_patch(
@@ -218,6 +218,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 error!("Failed to save patch: {}", e);
                                             }
                                         }
+                                    }
+                                    Ok(None) => {
+                                        info!("Skipped patchset creation (reply mismatch or duplicate) for {}", metadata.message_id);
                                     }
                                     Err(e) => {
                                         error!("Failed to save patchset: {}", e);

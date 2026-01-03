@@ -173,7 +173,7 @@ impl Database {
         cc: &str,
         baseline_id: Option<i64>,
         version: Option<u32>,
-    ) -> Result<i64> {
+    ) -> Result<Option<i64>> {
         // Find candidate patchsets in this thread
         let mut rows = self
             .conn
@@ -184,12 +184,19 @@ impl Database {
             .await?;
 
         let mut matched_id = None;
+        let mut has_existing_patchsets = false;
+        let mut author_exists_in_thread = false;
 
         while let Ok(Some(row)) = rows.next().await {
+            has_existing_patchsets = true;
             let id: i64 = row.get(0)?;
             let existing_date: i64 = row.get(1)?;
             let existing_author: String = row.get(2)?;
             let existing_subject: String = row.get(3)?;
+
+            if existing_author == author {
+                author_exists_in_thread = true;
+            }
 
             // Parse version from existing subject
             let existing_version = crate::patch::parse_subject_version(&existing_subject);
@@ -205,6 +212,15 @@ impl Database {
                 matched_id = Some(id);
                 break;
             }
+        }
+
+        // Enforce Same Sender constraint:
+        // If there are existing patchsets in this thread, but NONE match our author,
+        // then this message is likely a reply/review from someone else, NOT a new patchset.
+        // We skip creating a patchset.
+        if has_existing_patchsets && !author_exists_in_thread {
+            info!("Skipping patchset creation for thread {} author '{}': different from existing patchset authors", thread_id, author);
+            return Ok(None);
         }
 
         if let Some(id) = matched_id {
@@ -226,7 +242,7 @@ impl Database {
                 ).await?;
             }
 
-            return Ok(id);
+            return Ok(Some(id));
         }
 
         // No match found, create new patchset
@@ -244,7 +260,7 @@ impl Database {
             .await?;
         if let Ok(Some(row)) = rows.next().await {
             let id: i64 = row.get(0)?;
-            Ok(id)
+            Ok(Some(id))
         } else {
             Err(anyhow::anyhow!(
                 "Failed to retrieve patchset ID after insert"
@@ -454,17 +470,14 @@ mod tests {
         assert_ne!(ps1, ps2, "Should create new patchset for later time");
 
         // 4. Create NEW patchset in same thread (Author B, Time 1000 - same time but diff author)
-        // Should create new ID
+        // Should SKIP (return None) because thread belongs to Author A
         let ps3 = db.create_patchset(
             thread_id, None, "Patchset 3", "Author B", 1000, 2, 1, "to", "cc", None, Some(1)
         ).await.unwrap();
-        assert_ne!(ps1, ps3, "Should create new patchset for different author");
+        assert!(ps3.is_none(), "Should skip patchset creation for different author in same thread");
 
         // 5. Create NEW patchset v2 (Author A, Time 1002 - close time, but v2)
         // Note: We simulate subject containing "v2" implicitly by passing version=Some(2)
-        // AND we must ensure subject is stored so parsing works.
-        // Wait, the logic parses subject from DB. So ps1 subject "Patchset 1" implies v1 (default).
-        // Here we pass "Patchset v2" as subject.
         let ps_v2 = db.create_patchset(
             thread_id, None, "[PATCH v2] Patchset 1", "Author A", 1002, 2, 1, "to", "cc", None, Some(2)
         ).await.unwrap();
