@@ -241,6 +241,16 @@ impl Database {
         Ok(patchsets)
     }
 
+    pub async fn count_patchsets(&self) -> Result<usize> {
+        let mut rows = self.conn.query("SELECT COUNT(*) FROM patchsets", libsql::params![]).await?;
+        if let Ok(Some(row)) = rows.next().await {
+            let count: i64 = row.get(0)?;
+            Ok(count as usize)
+        } else {
+            Ok(0)
+        }
+    }
+
     pub async fn get_patchset_details(
         &self,
         message_id: &str,

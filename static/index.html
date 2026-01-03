@@ -35,14 +35,17 @@
         </tbody>
     </table>
     <div id="pagination" style="margin-top: 20px; text-align: center;">
+        <button id="firstBtn" onclick="goToPage(1)" disabled>First</button>
         <button id="prevBtn" onclick="changePage(-1)" disabled>Previous</button>
-        <span id="pageInfo" style="margin: 0 10px;">Page 1</span>
+        <span id="pageInfo" style="margin: 0 10px;">Page 1 of ?</span>
         <button id="nextBtn" onclick="changePage(1)">Next</button>
+        <button id="lastBtn" onclick="goToLast()" disabled>Last</button>
     </div>
 
     <script>
         let currentPage = 1;
         const perPage = 50;
+        let totalPages = 1;
 
         async function fetchStats() {
             const res = await fetch('/api/stats');
@@ -59,29 +62,43 @@
 
         async function changePage(delta) {
             const newPage = currentPage + delta;
-            if (newPage < 1) return;
+            if (newPage < 1 || newPage > totalPages) return;
             currentPage = newPage;
+            await fetchPatchsets();
+        }
+
+        async function goToPage(page) {
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            await fetchPatchsets();
+        }
+
+        async function goToLast() {
+            currentPage = totalPages;
             await fetchPatchsets();
         }
 
         async function fetchPatchsets() {
             const res = await fetch(`/api/patchsets?page=${currentPage}&per_page=${perPage}`);
             const data = await res.json();
+            
+            // Handle new response format { items, total, page, per_page }
+            const items = data.items || data; // Fallback if API hasn't updated yet (race condition)
+            const total = data.total || 0;
+            
+            totalPages = Math.ceil(total / perPage);
+            if (totalPages === 0) totalPages = 1;
+
             const tbody = document.querySelector('#patchsets tbody');
             tbody.innerHTML = '';
             
-            if (data.length === 0 && currentPage > 1) {
-                // If current page is empty and we are not on page 1, go back (optional, or just show empty)
-                // For now, let's just show empty table but disable Next
-                document.getElementById('nextBtn').disabled = true;
-            } else {
-                document.getElementById('nextBtn').disabled = data.length < perPage;
-            }
-            
+            document.getElementById('firstBtn').disabled = currentPage <= 1;
             document.getElementById('prevBtn').disabled = currentPage <= 1;
-            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+            document.getElementById('lastBtn').disabled = currentPage >= totalPages;
+            document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages} (${total} total)`;
 
-            data.forEach(p => {
+            items.forEach(p => {
                 const row = document.createElement('tr');
                 const date = new Date(p.date * 1000).toISOString().split('T')[0];
                 
