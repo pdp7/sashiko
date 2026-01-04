@@ -12,7 +12,7 @@ mod settings;
 
 use clap::{Parser, Subcommand};
 use db::Database;
-use events::Event;
+use events::{Event, ParsedArticle};
 use ingestor::Ingestor;
 use settings::Settings;
 use std::sync::Arc;
@@ -74,28 +74,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return inspector::run_inspection(db).await.map_err(|e| e.into());
     }
 
-    // Create internal task queue
-    let (tx, mut rx) = mpsc::channel::<Event>(1000);
+    // Create internal task queues
+    // raw_tx -> Parser -> parsed_tx -> DB Worker
+    let (raw_tx, mut raw_rx) = mpsc::channel::<Event>(1000);
+    let (parsed_tx, mut parsed_rx) = mpsc::channel::<ParsedArticle>(1000);
 
-    // Spawn Worker (Transactional Batching)
+    // Parser Dispatcher
+    tokio::spawn(async move {
+        info!("Parser Dispatcher started");
+        while let Some(event) = raw_rx.recv().await {
+            let tx = parsed_tx.clone();
+            tokio::spawn(async move {
+                // Extract raw bytes
+                let (group, article_id, raw_bytes) = match event {
+                    Event::ArticleFetched {
+                        group,
+                        article_id,
+                        content,
+                        raw,
+                    } => {
+                        let bytes = match raw {
+                            Some(b) => b,
+                            None => content.join("\n").into_bytes(),
+                        };
+                        (group, article_id, bytes)
+                    }
+                };
+
+                // Offload CPU parsing to blocking thread pool
+                let parse_result =
+                    tokio::task::spawn_blocking(move || crate::patch::parse_email(&raw_bytes))
+                        .await;
+
+                match parse_result {
+                    Ok(Ok((metadata, patch_opt))) => {
+                        if let Err(e) = tx
+                            .send(ParsedArticle {
+                                group,
+                                article_id,
+                                metadata,
+                                patch: patch_opt,
+                            })
+                            .await
+                        {
+                            error!("Failed to send parsed article: {}", e);
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        info!("Parse error for {}: {}", article_id, e);
+                    }
+                    Err(e) => {
+                        error!("Join error in parser: {}", e);
+                    }
+                }
+            });
+        }
+    });
+
+    // DB Worker (Transactional Batching)
     let worker_db = db.clone();
     tokio::spawn(async move {
-        info!("Worker started");
+        info!("DB Worker started");
 
         let mut buffer = Vec::with_capacity(100);
         loop {
-            let count = rx.recv_many(&mut buffer, 100).await;
+            let count = parsed_rx.recv_many(&mut buffer, 100).await;
             if count == 0 {
                 break;
             }
 
-            info!("Processing batch of {} events", count);
+            info!("Processing batch of {} parsed articles", count);
             if let Err(e) = worker_db.begin_transaction().await {
                 error!("Failed to begin transaction: {}", e);
             }
 
-            for event in buffer.drain(..) {
-                process_event(&worker_db, event).await;
+            for article in buffer.drain(..) {
+                process_parsed_article(&worker_db, article).await;
             }
 
             if let Err(e) = worker_db.commit_transaction().await {
@@ -104,8 +158,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Start Ingestor
-    let ingestor = Ingestor::new(settings.clone(), db.clone(), tx, cli.download, cli.no_nntp);
+    // Start Ingestor (feeds raw_tx)
+    let ingestor = Ingestor::new(
+        settings.clone(),
+        db.clone(),
+        raw_tx,
+        cli.download,
+        cli.no_nntp,
+    );
     tokio::spawn(async move {
         if let Err(e) = ingestor.run().await {
             error!("Ingestor fatal error: {}", e);
@@ -128,216 +188,190 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn process_event(worker_db: &Database, event: Event) {
-    match event {
-        Event::ArticleFetched {
-            group,
-            article_id,
-            content,
-            raw,
-        } => {
-            let raw_bytes = match raw {
-                Some(b) => b,
-                None => content.join("\n").into_bytes(),
-            };
+async fn process_parsed_article(worker_db: &Database, article: ParsedArticle) {
+    let ParsedArticle {
+        group,
+        article_id,
+        metadata,
+        patch,
+    } = article;
+    let patch_opt = patch;
 
-            match crate::patch::parse_email(&raw_bytes) {
-                Ok((metadata, patch_opt)) => {
-                    // 1. Thread Resolution
-                    let thread_id = if let Some(ref reply_to) = metadata.in_reply_to {
-                        match worker_db
-                            .ensure_thread_for_message(reply_to, metadata.date)
-                            .await
-                        {
-                            Ok(tid) => tid,
-                            Err(e) => {
-                                error!("Failed to ensure thread for parent {}: {}", reply_to, e);
-                                return;
-                            }
-                        }
-                    } else {
-                        match worker_db
-                            .ensure_thread_for_message(&metadata.message_id, metadata.date)
-                            .await
-                        {
-                            Ok(tid) => tid,
-                            Err(e) => {
-                                error!(
-                                    "Failed to ensure thread for self {}: {}",
-                                    metadata.message_id, e
-                                );
-                                return;
-                            }
-                        }
-                    };
+    // 1. Thread Resolution
+    let thread_id = if let Some(ref reply_to) = metadata.in_reply_to {
+        match worker_db
+            .ensure_thread_for_message(reply_to, metadata.date)
+            .await
+        {
+            Ok(tid) => tid,
+            Err(e) => {
+                error!("Failed to ensure thread for parent {}: {}", reply_to, e);
+                return;
+            }
+        }
+    } else {
+        match worker_db
+            .ensure_thread_for_message(&metadata.message_id, metadata.date)
+            .await
+        {
+            Ok(tid) => tid,
+            Err(e) => {
+                error!(
+                    "Failed to ensure thread for self {}: {}",
+                    metadata.message_id, e
+                );
+                return;
+            }
+        }
+    };
 
-                    // 2. Create Message
-                    if let Err(e) = worker_db
-                        .create_message(
-                            &metadata.message_id,
-                            thread_id,
-                            metadata.in_reply_to.as_deref(),
-                            &metadata.author,
-                            &metadata.subject,
-                            metadata.date,
-                            &metadata.body,
-                            &metadata.to,
-                            &metadata.cc,
-                        )
-                        .await
-                    {
-                        error!("Failed to create message: {}", e);
-                    }
+    // 2. Create Message
+    if let Err(e) = worker_db
+        .create_message(
+            &metadata.message_id,
+            thread_id,
+            metadata.in_reply_to.as_deref(),
+            &metadata.author,
+            &metadata.subject,
+            metadata.date,
+            &metadata.body,
+            &metadata.to,
+            &metadata.cc,
+        )
+        .await
+    {
+        error!("Failed to create message: {}", e);
+    }
 
-                    // Subsystem Identification and Linking
-                    let subsystems = identify_subsystems(&metadata.to, &metadata.cc);
-                    let mut subsystem_ids = Vec::new();
-                    for (name, email) in subsystems {
-                        match worker_db.ensure_subsystem(&name, &email).await {
-                            Ok(sid) => subsystem_ids.push(sid),
-                            Err(e) => error!("Failed to ensure subsystem {}: {}", name, e),
-                        }
-                    }
+    // Subsystem Identification and Linking
+    let subsystems = identify_subsystems(&metadata.to, &metadata.cc);
+    let mut subsystem_ids = Vec::new();
+    for (name, email) in subsystems {
+        match worker_db.ensure_subsystem(&name, &email).await {
+            Ok(sid) => subsystem_ids.push(sid),
+            Err(e) => error!("Failed to ensure subsystem {}: {}", name, e),
+        }
+    }
 
-                    if let Ok(Some(msg_id_db)) = worker_db
-                        .get_message_id_by_msg_id(&metadata.message_id)
-                        .await
-                    {
-                        for &sid in &subsystem_ids {
-                            if let Err(e) = worker_db.add_subsystem_to_message(msg_id_db, sid).await
-                            {
-                                error!("Failed to link message to subsystem: {}", e);
-                            }
-                            if let Err(e) = worker_db.add_subsystem_to_thread(thread_id, sid).await
-                            {
-                                error!("Failed to link thread to subsystem: {}", e);
-                            }
-                        }
-                    }
+    if let Ok(Some(msg_id_db)) = worker_db
+        .get_message_id_by_msg_id(&metadata.message_id)
+        .await
+    {
+        for &sid in &subsystem_ids {
+            if let Err(e) = worker_db.add_subsystem_to_message(msg_id_db, sid).await {
+                error!("Failed to link message to subsystem: {}", e);
+            }
+            if let Err(e) = worker_db.add_subsystem_to_thread(thread_id, sid).await {
+                error!("Failed to link thread to subsystem: {}", e);
+            }
+        }
+    }
 
-                    // Check version to decide whether to skip or update
-                    let subject = if metadata.subject.len() > 80 {
-                        format!("{}...", &metadata.subject[..77])
-                    } else {
-                        metadata.subject.clone()
-                    };
+    let subject = if metadata.subject.len() > 80 {
+        format!("{}...", &metadata.subject[..77])
+    } else {
+        metadata.subject.clone()
+    };
 
-                    // Detect baseline
-                    let baseline = crate::baseline::detect_baseline(
-                        &metadata.subject,
-                        patch_opt.as_ref().map(|p| p.body.as_str()).unwrap_or(""),
-                    );
-                    let baseline_id = match baseline {
-                        Ok(b) if b.branch.is_some() || b.commit.is_some() => {
-                            match worker_db
-                                .create_baseline(
-                                    b.repo_url.as_deref(),
-                                    b.branch.as_deref(),
-                                    b.commit.as_deref(),
-                                )
-                                .await
-                            {
-                                Ok(id) => Some(id),
-                                Err(e) => {
-                                    error!("Failed to create baseline: {}", e);
-                                    None
-                                }
-                            }
-                        }
-                        _ => None,
-                    };
-
-                    info!(
-                        "Article: group={}, id={}, author={}, subject=\"{}\"",
-                        group, article_id, metadata.author, subject
-                    );
-
-                    let cover_letter_id = if metadata.index == 0 {
-                        Some(metadata.message_id.as_str())
-                    } else {
-                        None
-                    };
-
-                    if metadata.is_patch_or_cover {
-                        match worker_db
-                            .create_patchset(
-                                thread_id,
-                                cover_letter_id,
-                                &metadata.subject,
-                                &metadata.author,
-                                metadata.date,
-                                metadata.total,
-                                PARSER_VERSION,
-                                &metadata.to,
-                                &metadata.cc,
-                                baseline_id,
-                                metadata.version,
-                                metadata.index,
-                            )
-                            .await
-                        {
-                            Ok(Some(patchset_id)) => {
-                                for &sid in &subsystem_ids {
-                                    if let Err(e) =
-                                        worker_db.add_subsystem_to_patchset(patchset_id, sid).await
-                                    {
-                                        error!("Failed to link patchset to subsystem: {}", e);
-                                    }
-                                }
-
-                                if let Some(patch) = patch_opt {
-                                    match worker_db
-                                        .create_patch(
-                                            patchset_id,
-                                            &patch.message_id,
-                                            patch.part_index,
-                                            &patch.diff,
-                                        )
-                                        .await
-                                    {
-                                        Ok(patch_id) => {
-                                            for &sid in &subsystem_ids {
-                                                if let Err(e) = worker_db
-                                                    .add_subsystem_to_patch(patch_id, sid)
-                                                    .await
-                                                {
-                                                    error!(
-                                                        "Failed to link patch to subsystem: {}",
-                                                        e
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        Err(e) => error!("Failed to save patch: {}", e),
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                info!(
-                                    "Skipped patchset creation (reply mismatch or duplicate) for {}",
-                                    metadata.message_id
-                                );
-                            }
-                            Err(e) => {
-                                error!("Failed to save patchset: {}", e);
-                            }
-                        }
-                    } else {
-                        info!(
-                            "Skipped patchset creation/update for non-patch message: {}",
-                            metadata.message_id
-                        );
-                    }
-                }
-
+    // Detect baseline
+    let baseline = crate::baseline::detect_baseline(
+        &metadata.subject,
+        patch_opt.as_ref().map(|p| p.body.as_str()).unwrap_or(""),
+    );
+    let baseline_id = match baseline {
+        Ok(b) if b.branch.is_some() || b.commit.is_some() => {
+            match worker_db
+                .create_baseline(
+                    b.repo_url.as_deref(),
+                    b.branch.as_deref(),
+                    b.commit.as_deref(),
+                )
+                .await
+            {
+                Ok(id) => Some(id),
                 Err(e) => {
-                    info!(
-                        "Article (parse failed): group={}, id={}, error={}",
-                        group, article_id, e
-                    );
+                    error!("Failed to create baseline: {}", e);
+                    None
                 }
             }
         }
+        _ => None,
+    };
+
+    info!(
+        "Article: group={}, id={}, author={}, subject=\"{}\"",
+        group, article_id, metadata.author, subject
+    );
+
+    let cover_letter_id = if metadata.index == 0 {
+        Some(metadata.message_id.as_str())
+    } else {
+        None
+    };
+
+    if metadata.is_patch_or_cover {
+        match worker_db
+            .create_patchset(
+                thread_id,
+                cover_letter_id,
+                &metadata.subject,
+                &metadata.author,
+                metadata.date,
+                metadata.total,
+                PARSER_VERSION,
+                &metadata.to,
+                &metadata.cc,
+                baseline_id,
+                metadata.version,
+                metadata.index,
+            )
+            .await
+        {
+            Ok(Some(patchset_id)) => {
+                for &sid in &subsystem_ids {
+                    if let Err(e) = worker_db.add_subsystem_to_patchset(patchset_id, sid).await {
+                        error!("Failed to link patchset to subsystem: {}", e);
+                    }
+                }
+
+                if let Some(patch) = patch_opt {
+                    match worker_db
+                        .create_patch(
+                            patchset_id,
+                            &patch.message_id,
+                            patch.part_index,
+                            &patch.diff,
+                        )
+                        .await
+                    {
+                        Ok(patch_id) => {
+                            for &sid in &subsystem_ids {
+                                if let Err(e) =
+                                    worker_db.add_subsystem_to_patch(patch_id, sid).await
+                                {
+                                    error!("Failed to link patch to subsystem: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => error!("Failed to save patch: {}", e),
+                    }
+                }
+            }
+            Ok(None) => {
+                info!(
+                    "Skipped patchset creation (reply mismatch or duplicate) for {}",
+                    metadata.message_id
+                );
+            }
+            Err(e) => {
+                error!("Failed to save patchset: {}", e);
+            }
+        }
+    } else {
+        info!(
+            "Skipped patchset creation/update for non-patch message: {}",
+            metadata.message_id
+        );
     }
 }
 
