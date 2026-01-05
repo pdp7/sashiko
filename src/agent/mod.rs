@@ -40,7 +40,6 @@ impl Agent {
 
     pub async fn run(&mut self, patchset: Value) -> Result<AgentResult> {
         let system_prompt = self.prompts.get_system_prompt().await?;
-        let context_prompt = self.prompts.build_context_prompt(&patchset).await?;
         let review_core = tokio::fs::read_to_string(self.prompts.get_base_dir().join("review-core.md"))
             .await
             .unwrap_or_else(|_| "Deep dive regression analysis protocol.".to_string());
@@ -51,13 +50,10 @@ impl Agent {
              Subject: {}\n\
              Author: {}\n\n\
              ## Review Protocol (review-core.md)\n\
-             {}\n\n\
-             ## Additional Context\n\
              {}",
             patchset["subject"].as_str().unwrap_or("Unknown"),
             patchset["author"].as_str().unwrap_or("Unknown"),
-            review_core,
-            context_prompt
+            review_core
         );
 
         let input_context = format!(
