@@ -15,7 +15,10 @@ use serde_json::json;
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[arg(long)]
-    patchset: i64,
+    patchset: Option<i64>,
+
+    #[arg(long)]
+    message_id: Option<String>,
 
     /// Git revision to use as baseline (e.g. "HEAD", "v6.12", or commit hash)
     #[arg(long)]
@@ -37,10 +40,20 @@ async fn main() -> Result<()> {
     let db = Database::new(&settings.database).await?;
 
     // Check patchset exists
-    let patchset_json = db.get_patchset_details(args.patchset).await?
-        .ok_or_else(|| anyhow::anyhow!("Patchset {} not found", args.patchset))?;
+    let patchset_json = if let Some(id) = args.patchset {
+        db.get_patchset_details(id).await?
+            .ok_or_else(|| anyhow::anyhow!("Patchset {} not found", id))?
+    } else if let Some(msg_id) = args.message_id {
+        db.get_patchset_details_by_msgid(&msg_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Patchset for message ID {} not found", msg_id))?
+    } else {
+        return Err(anyhow::anyhow!("Either --patchset or --message-id must be provided"));
+    };
 
-    info!("Reviewing patchset: {}", patchset_json["subject"]);
+    let patchset_id = patchset_json["id"].as_i64()
+        .ok_or_else(|| anyhow::anyhow!("Patchset ID not found in database response"))?;
+
+    info!("Reviewing patchset: {} (ID: {})", patchset_json["subject"], patchset_id);
 
     let repo_path = PathBuf::from(&settings.git.repository_path);
     // Use provided baseline
@@ -48,7 +61,7 @@ async fn main() -> Result<()> {
 
     info!("Created worktree at {:?}", worktree.path);
 
-    let diffs = db.get_patch_diffs(args.patchset).await?;
+    let diffs = db.get_patch_diffs(patchset_id).await?;
     info!("Found {} patches to apply", diffs.len());
     
     let mut patch_results = Vec::new();
@@ -85,7 +98,7 @@ async fn main() -> Result<()> {
     }
 
     let result = json!({
-        "patchset_id": args.patchset,
+        "patchset_id": patchset_id,
         "baseline": args.baseline,
         "patches": patch_results,
         "review": null
