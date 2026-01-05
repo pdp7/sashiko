@@ -119,6 +119,8 @@ The data model is built around five core entities: **Messages**, **Threads**, **
 ### 5.1. AI Prompting
 Sashiko integrates with the AI Review Engine using prompts managed in the [review-prompts](https://github.com/masoncl/review-prompts) repository. It handles the injection of patch context (diffs, metadata) into these templates and manages the resulting interaction chain.
 
+For a detailed breakdown of the prompting strategy, context management, and stability heuristics, refer to `DESIGN_LLM_REVIEW_STRATEGY.md`.
+
 ### 5.2. Web API Endpoints
 *   `GET /api/patchsets`: List latest patchsets with status and filtering (e.g., `?status=Reviewed`).
 *   `GET /api/patchsets/:id`: Detailed view of a patchset, including all patches and reviews.
