@@ -437,7 +437,16 @@ async fn run_review_tool(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let json: serde_json::Value = serde_json::from_str(&stdout)?;
+    let json: serde_json::Value = match serde_json::from_str(&stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(
+                "Failed to parse JSON output from review tool. Raw stdout: '{}'",
+                stdout
+            );
+            return Err(e.into());
+        }
+    };
 
     // Update DB with patch statuses
     if let Some(patches) = json["patches"].as_array() {

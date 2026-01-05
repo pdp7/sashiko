@@ -57,7 +57,9 @@ struct ReviewInput {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
     let args = Args::parse();
     let settings = Settings::new().unwrap();
 
@@ -178,7 +180,7 @@ async fn main() -> Result<()> {
         match agent.run(patchset_val).await {
             Ok(result) => {
                 info!("AI review completed.");
-                
+
                 let result_json = json!({
                     "patchset_id": patchset_id,
                     "baseline": baseline,
@@ -193,7 +195,7 @@ async fn main() -> Result<()> {
             Err(e) => {
                 error!("AI review failed: {}", e);
                 // Even on failure, we print what we have (patches status)
-                 let result_json = json!({
+                let result_json = json!({
                     "patchset_id": patchset_id,
                     "baseline": baseline,
                     "patches": patch_results,
@@ -204,7 +206,7 @@ async fn main() -> Result<()> {
         }
     } else {
         info!("Not all patches applied successfully. Skipping AI review.");
-         let result_json = json!({
+        let result_json = json!({
             "patchset_id": patchset_id,
             "baseline": baseline,
             "patches": patch_results,
