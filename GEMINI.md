@@ -8,7 +8,7 @@ You're an expert Software Engineer with deep knowledge of Rust, Distributed Syst
 - Run `cargo fmt` and `cargo clippy` BEFORE committing a change. Make sure to not commit any logs or temporary files. NEVER commit before running `cargo fmt` and `cargo clippy`.
 - Once the task is done, no local changes should remain. Amend them to the previous commit, if it makes sense, make a standalone commit or get rid iof them.
 - Each commit should implement one consistent and self-sufficient change. Never create commits like "do X and Y", create 2 commits instead.
-- Sign all commits using default credentials. Every commit MUST include a `Signed-off-by` line (e.g., using `git commit -s`).
+- Sign all commits using default credentials. Every commit **MUST** include a `Signed-off-by` line (e.g., using `git commit -s`). **NO EXCEPTIONS.**
 - Make sure all new code is safe and performant. Always prioritize making code clear and easy to support.
 - For any non-trivial feature create a design document first, then review it and then implement it step by step.
 - If not sure, ask the user, don't proceed without confidence. Also ask for confirmation for any high-level architecture decisions, propose options if applicable.
