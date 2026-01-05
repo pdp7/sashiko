@@ -49,7 +49,10 @@ impl Agent {
             context_prompt
         );
 
-        let input_context = format!("System: {}\n\nUser: {}", system_prompt, initial_user_message);
+        let input_context = format!(
+            "System: {}\n\nUser: {}",
+            system_prompt, initial_user_message
+        );
 
         let system_content = Content {
             role: "user".to_string(), // Using user role for system instruction placeholder if needed, but we use the field.
@@ -173,7 +176,7 @@ impl Agent {
                 let json_val: Value = serde_json::from_str(clean_text).map_err(|e| {
                     anyhow!("Failed to parse JSON response: {}. Text: {}", e, final_text)
                 })?;
-                
+
                 return Ok(AgentResult {
                     output: json_val,
                     input_context,
