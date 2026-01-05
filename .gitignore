@@ -5,4 +5,5 @@ Cargo.lock
 *.db-journal
 *.db-wal
 *.db-shm
-archives/.cargo/config.toml
+archives/
+.cargo/config.toml
