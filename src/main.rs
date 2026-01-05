@@ -1,20 +1,8 @@
-mod ai;
-mod api;
-mod baseline;
-mod db;
-mod events;
-mod git_ops;
-mod ingestor;
-mod inspector;
-mod nntp;
-mod patch;
-mod settings;
-
 use clap::{Parser, Subcommand};
-use db::Database;
-use events::{Event, ParsedArticle};
-use ingestor::Ingestor;
-use settings::Settings;
+use sashiko::db::Database;
+use sashiko::events::{Event, ParsedArticle};
+use sashiko::ingestor::Ingestor;
+use sashiko::settings::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -75,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.migrate().await?;
 
     if let Some(Commands::Inspect) = cli.command {
-        return inspector::run_inspection(db).await.map_err(|e| e.into());
+        return sashiko::inspector::run_inspection(db).await.map_err(|e| e.into());
     }
 
     // Create internal task queues
@@ -107,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Offload CPU parsing to blocking thread pool
                 let parse_result =
-                    tokio::task::spawn_blocking(move || crate::patch::parse_email(&raw_bytes))
+                    tokio::task::spawn_blocking(move || sashiko::patch::parse_email(&raw_bytes))
                         .await;
 
                 match parse_result {
@@ -206,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_settings = settings.server.clone();
     let api_db = db.clone();
     tokio::spawn(async move {
-        if let Err(e) = api::run_server(api_settings, api_db).await {
+        if let Err(e) = sashiko::api::run_server(api_settings, api_db).await {
             error!("Web API fatal error: {}", e);
         }
     });
