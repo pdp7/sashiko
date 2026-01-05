@@ -84,7 +84,7 @@ impl GitWorktree {
     }
 
     #[allow(dead_code)]
-    pub async fn apply_raw_diff(&self, diff_content: &str) -> Result<()> {
+    pub async fn apply_raw_diff(&self, diff_content: &str) -> Result<std::process::Output> {
         info!("Applying raw diff in {:?}", self.path);
 
         let mut child = Command::new("git")
@@ -104,14 +104,7 @@ impl GitWorktree {
 
         let output = child.wait_with_output().await?;
 
-        if !output.status.success() {
-             return Err(anyhow!(
-                "git apply failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(())
+        Ok(output)
     }
 
     #[allow(dead_code)]
