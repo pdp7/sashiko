@@ -38,8 +38,8 @@ struct Args {
     #[arg(long, default_value = "review-prompts")]
     prompts: PathBuf,
 
-    #[arg(long, default_value = "gemini-3-flash-preview")]
-    model: String,
+    #[arg(long)]
+    model: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -165,7 +165,8 @@ async fn main() -> Result<()> {
 
     if all_applied {
         info!("All patches applied. Starting AI review...");
-        let client = GeminiClient::new(args.model.clone());
+        let model_name = args.model.unwrap_or_else(|| settings.ai.model.clone());
+        let client = GeminiClient::new(model_name);
         let tools = ToolBox::new(worktree.path.clone(), args.prompts.clone());
         let prompts = PromptRegistry::new(args.prompts.clone());
         let mut agent = Agent::new(client, tools, prompts);

@@ -12,8 +12,6 @@ pub struct Agent {
     client: GeminiClient,
     tools: ToolBox,
     prompts: PromptRegistry,
-    #[allow(dead_code)]
-    model: String,
     history: Vec<Content>,
 }
 
@@ -23,7 +21,6 @@ impl Agent {
             client,
             tools,
             prompts,
-            model: "gemini-1.5-pro-latest".to_string(),
             history: Vec::new(),
         }
     }
