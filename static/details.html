@@ -36,6 +36,9 @@
         .review-details.open { display: block; }
         .toggle-btn { cursor: pointer; color: #007bff; font-size: 0.9em; background: none; border: none; padding: 0; text-decoration: underline; margin-right: 10px; }
         .log-block { background: #333; color: #f0f0f0; padding: 10px; white-space: pre-wrap; font-family: monospace; max-height: 400px; overflow-y: auto; border-radius: 4px; font-size: 0.85em; margin-top: 5px; }
+        .diff-added { background-color: #28a74533; color: #acf2bd; display: block; }
+        .diff-removed { background-color: #d73a4933; color: #ffdce0; display: block; }
+        .diff-header { color: #79b8ff; font-weight: bold; }
         .token-stats { font-size: 0.85em; color: #777; margin-top: 5px; }
     </style>
 </head>
@@ -112,7 +115,7 @@
                         logsSection = `
                             <div style="margin-top: 10px;">
                                 <strong>Logs / Errors:</strong>
-                                <div class="log-block">${escapeHtml(r.logs)}</div>
+                                <div class="log-block">${escapeHtml(r.logs, true)}</div>
                             </div>
                         `;
                     }
@@ -279,14 +282,29 @@
             `;
         }
 
-        function escapeHtml(text) {
+        function escapeHtml(text, highlightDiff = false) {
             if (!text) return '';
-            return text
+            const escaped = text
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
+            
+            if (highlightDiff) {
+                const lines = escaped.split('\n');
+                return lines.map(line => {
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                        return `<span class="diff-added">${line}</span>`;
+                    } else if (line.startsWith('-') && !line.startsWith('---')) {
+                        return `<span class="diff-removed">${line}</span>`;
+                    } else if (line.startsWith('@@') || line.startsWith('diff --git') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+                        return `<span class="diff-header">${line}</span>`;
+                    }
+                    return line;
+                }).join('\n');
+            }
+            return escaped;
         }
 
         fetchDetails();

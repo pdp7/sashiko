@@ -11,7 +11,10 @@
         .meta { color: #666; font-size: 0.9em; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
         .meta div { margin-bottom: 4px; }
         .label { font-weight: bold; width: 60px; display: inline-block; }
-        pre { background: #f8f8f8; padding: 15px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+        pre { background: #f8f8f8; padding: 15px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; line-height: 1.4; }
+        .diff-added { background-color: #e6ffed; color: #22863a; display: block; }
+        .diff-removed { background-color: #ffeef0; color: #cb2431; display: block; }
+        .diff-header { color: #005cc5; font-weight: bold; }
         .copy-btn { margin-left: 10px; cursor: pointer; padding: 2px 8px; background: #eee; border: 1px solid #ccc; border-radius: 4px; font-size: 0.8em; }
         .copy-btn:hover { background: #ddd; }
         .nav { margin-bottom: 20px; }
@@ -90,6 +93,27 @@
             }
         }
 
+        function formatBody(text) {
+            const lines = text.split('\n');
+            return lines.map(line => {
+                const escaped = escapeHtml(line);
+                if (line.startsWith('+') && !line.startsWith('+++')) {
+                    return `<span class="diff-added">${escaped}</span>`;
+                } else if (line.startsWith('-') && !line.startsWith('---')) {
+                    return `<span class="diff-removed">${escaped}</span>`;
+                } else if (line.startsWith('@@') || line.startsWith('diff --git') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+                    return `<span class="diff-header">${escaped}</span>`;
+                }
+                return escaped;
+            }).join('\n');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         async function fetchMessage() {
             if (!id) {
                 document.getElementById('loading').innerText = 'No message ID provided';
@@ -111,7 +135,7 @@
 
                 const bodyElem = document.getElementById('body');
                 const subjectLine = `Subject: ${data.subject || '(No Subject)'}\n\n`;
-                bodyElem.innerText = subjectLine + (data.body || '(No body content)');
+                bodyElem.innerHTML = formatBody(subjectLine + (data.body || '(No body content)'));
 
                 if (data.thread && data.thread.length > 0) {
                     renderThreadTree(data.thread, data.id);
