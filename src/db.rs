@@ -60,7 +60,7 @@ impl Database {
             let mut messages = Vec::new();
             if let Some(tid) = thread_id {
                 let mut msg_rows = self.conn.query(
-                    "SELECT id, message_id, author, date, subject, in_reply_to FROM messages WHERE thread_id = ? ORDER BY date ASC",
+                    "SELECT id, message_id, author, date, subject, in_reply_to FROM messages WHERE thread_id = ? AND subject != '(placeholder)' ORDER BY date ASC",
                     libsql::params![tid]
                 ).await?;
                 while let Ok(Some(m)) = msg_rows.next().await {
@@ -846,32 +846,32 @@ impl Database {
         if let Some(q) = query {
             let q = q.trim();
             if q.is_empty() {
-                return (String::new(), vec![]);
+                return ("WHERE subject != '(placeholder)'".to_string(), vec![]);
             }
 
             if let Some(val) = q.strip_prefix("author:") {
                 return (
-                    "WHERE author LIKE ?".to_string(),
+                    "WHERE author LIKE ? AND subject != '(placeholder)'".to_string(),
                     vec![format!("%{}%", val.trim())],
                 );
             } else if let Some(val) = q.strip_prefix("subject:") {
                 return (
-                    "WHERE subject LIKE ?".to_string(),
+                    "WHERE subject LIKE ? AND subject != '(placeholder)'".to_string(),
                     vec![format!("%{}%", val.trim())],
                 );
             } else if let Some(val) = q.strip_prefix("date:") {
                 return (
-                    "WHERE datetime(date, 'unixepoch') LIKE ?".to_string(),
+                    "WHERE datetime(date, 'unixepoch') LIKE ? AND subject != '(placeholder)'".to_string(),
                     vec![format!("%{}%", val.trim())],
                 );
             } else {
                 return (
-                    "WHERE subject LIKE ? OR author LIKE ?".to_string(),
+                    "WHERE (subject LIKE ? OR author LIKE ?) AND subject != '(placeholder)'".to_string(),
                     vec![format!("%{}%", q), format!("%{}%", q)],
                 );
             }
         }
-        (String::new(), vec![])
+        ("WHERE subject != '(placeholder)'".to_string(), vec![])
     }
 
     pub async fn get_patchsets(
@@ -1098,7 +1098,7 @@ impl Database {
             let mut messages = Vec::new();
             if let Some(tid) = thread_id {
                 let mut msg_rows = self.conn.query(
-                    "SELECT id, message_id, author, date, subject, in_reply_to FROM messages WHERE thread_id = ? ORDER BY date ASC",
+                    "SELECT id, message_id, author, date, subject, in_reply_to FROM messages WHERE thread_id = ? AND subject != '(placeholder)' ORDER BY date ASC",
                     libsql::params![tid]
                 ).await?;
                 while let Ok(Some(m)) = msg_rows.next().await {
