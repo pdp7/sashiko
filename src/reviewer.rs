@@ -581,25 +581,6 @@ async fn run_review_tool(
 
     let mut child = cmd.spawn()?;
 
-    // Send initial payload
-    if let Some(mut stdin) = child.stdin.take() {
-        let mut input_str = serde_json::to_string(input_payload)?;
-        input_str.push('\n'); // Ensure line break for conversational mode
-        stdin.write_all(input_str.as_bytes()).await?;
-        stdin.flush().await?;
-        // Keep stdin open? No, we Dropped stdin here by taking it out of scope?
-        // Wait, `take()` moves it out.
-        // If we drop `stdin`, the pipe closes!
-        // `review` binary reads one line, so it doesn't matter if pipe closes?
-        // BUT `StdioGeminiClient` in child needs to read *subsequent* responses from stdin.
-        // So we MUST NOT close stdin.
-        // We need to keep `stdin` alive and use it in the loop.
-        // So we shouldn't drop `stdin` here.
-        // I will fix this in the loop logic below.
-    } else {
-        anyhow::bail!("Failed to open stdin for child process");
-    }
-
     // We need to hold stdin to write responses
     // But `child.stdin` is Option. We took it. We need to pass it to loop.
     // However, `child.spawn()` returns child.
