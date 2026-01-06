@@ -46,6 +46,7 @@
 - [ ] Implement RBAC (Role-Based Access Control) for API endpoints (Deferred).
 - [x] Implement minimalistic "kernel.org style" frontend (Raw HTML/JS/CSS).
 - [x] Implement individual message view (metadata + body + copy ID).
+- [x] Implement detailed AI interaction log view and API endpoint.
 - [x] Polish frontend diff rendering and code block styling.
 - [ ] Add UI for re-running reviews and manual baseline overrides.
 - [ ] Configure Nginx as static file server and reverse proxy.
