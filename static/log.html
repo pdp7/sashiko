@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sashiko - Review Log</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #f6f8fa; 
+            color: #24292f;
+        }
+        h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 10px; margin-bottom: 20px; font-size: 1.5em; }
+        
+        .header-meta {
+            background: white;
+            padding: 15px;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 0.9em;
+        }
+        .meta-item { display: flex; flex-direction: column; }
+        .meta-label { font-weight: bold; color: #57606a; font-size: 0.8em; margin-bottom: 2px; }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .message-row {
+            display: flex;
+            width: 100%;
+        }
+
+        .message-row.user { justify-content: flex-start; }
+        .message-row.model { justify-content: flex-end; }
+        .message-row.tool { justify-content: center; }
+
+        .message-bubble {
+            max-width: 85%;
+            padding: 10px 15px;
+            border-radius: 6px;
+            position: relative;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            overflow-wrap: break-word;
+        }
+
+        .user .message-bubble {
+            background-color: #ffffff;
+            border: 1px solid #d0d7de;
+            border-left: 4px solid #0969da;
+        }
+
+        .model .message-bubble {
+            background-color: #f1f8ff; /* Light blue tint */
+            border: 1px solid #c8e1ff;
+            border-right: 4px solid #0969da;
+        }
+
+        .tool .message-bubble {
+            background-color: #f6f8fa;
+            border: 1px solid #d0d7de;
+            border-top: 4px solid #cf222e; /* Red for tool/system */
+            max-width: 95%;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            font-size: 0.85em;
+        }
+
+        .role-badge {
+            font-size: 0.75em;
+            font-weight: bold;
+            color: #57606a;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            display: block;
+        }
+        
+        .content-block {
+            white-space: pre-wrap;
+        }
+
+        /* Collapsible formatting */
+        .collapsible {
+            border: 1px solid #d0d7de;
+            border-radius: 4px;
+            margin-top: 5px;
+            background: white;
+            overflow: hidden;
+        }
+        .collapsible-header {
+            background: #f6f8fa;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+        .collapsible-header:hover { background: #eef1f4; }
+        .collapsible-content {
+            padding: 10px;
+            display: none;
+            overflow-x: auto;
+            border-top: 1px solid #d0d7de;
+        }
+        .collapsible.open .collapsible-content { display: block; }
+        .collapsible.open .arrow::after { content: '▼'; }
+        .arrow::after { content: '▶'; font-size: 0.8em; margin-left: 5px; }
+
+        pre { margin: 0; }
+        code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+
+        /* Function Call Styling */
+        .fn-call {
+            background: #fffbdd;
+            border: 1px solid #e3d06f;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: monospace;
+            margin-bottom: 5px;
+        }
+        .fn-name { color: #d9534f; font-weight: bold; }
+        .fn-args { color: #333; }
+
+        a { color: #0969da; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .back-link { display: inline-block; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <a href="javascript:history.back()" class="back-link">← Back</a>
+    <h1>Review Interaction Log</h1>
+    <div id="meta" class="header-meta">Loading metadata...</div>
+    <div id="chat" class="chat-container">
+        <div style="text-align: center; padding: 20px; color: #555;">Loading conversation...</div>
+    </div>
+
+    <script>
+        async function fetchLog() {
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+            if (!id) {
+                document.getElementById('chat').innerHTML = 'No Review ID provided.';
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/review?id=${id}`);
+                if (!res.ok) throw new Error(res.statusText);
+                const data = await res.json();
+                render(data);
+            } catch (e) {
+                document.getElementById('chat').innerHTML = `Error loading log: ${e.message}`;
+            }
+        }
+
+        function render(data) {
+            // Render Meta
+            const date = new Date(data.created_at * 1000).toLocaleString();
+            document.getElementById('meta').innerHTML = `
+                <div class="meta-item"><span class="meta-label">ID</span><span>${data.id}</span></div>
+                <div class="meta-item"><span class="meta-label">Model</span><span>${data.model || '?'}</span></div>
+                <div class="meta-item"><span class="meta-label">Status</span><span>${data.status}</span></div>
+                <div class="meta-item"><span class="meta-label">Date</span><span>${date}</span></div>
+                <div class="meta-item"><span class="meta-label">Result</span><span>${data.result || '-'}</span></div>
+                <div class="meta-item"><span class="meta-label">Tokens</span><span>${data.tokens_in} in / ${data.tokens_out} out</span></div>
+            `;
+
+            const chatContainer = document.getElementById('chat');
+            chatContainer.innerHTML = '';
+
+            let logs = [];
+            try {
+                if (data.logs) {
+                    logs = JSON.parse(data.logs);
+                }
+            } catch (e) {
+                // If not JSON, render as single raw block
+                chatContainer.innerHTML = `<div class="message-row tool"><div class="message-bubble"><div class="role-badge">RAW LOG</div><pre class="content-block">${escapeHtml(data.logs)}</pre></div></div>`;
+                return;
+            }
+
+            if (!Array.isArray(logs)) {
+                 chatContainer.innerHTML = `<div class="message-row tool"><div class="message-bubble"><div class="role-badge">RAW LOG</div><pre class="content-block">${escapeHtml(JSON.stringify(logs, null, 2))}</pre></div></div>`;
+                 return;
+            }
+
+            if (logs.length === 0) {
+                chatContainer.innerHTML = '<p style="text-align:center">No interaction history found.</p>';
+                return;
+            }
+
+            logs.forEach(msg => {
+                const role = msg.role || 'unknown';
+                const parts = msg.parts || [];
+                
+                let contentHtml = '';
+                
+                parts.forEach(part => {
+                    if (part.text) {
+                        contentHtml += `<div class="content-block">${formatText(part.text)}</div>`;
+                    }
+                    if (part.function_call) {
+                        contentHtml += `
+                            <div class="fn-call">
+                                <div class="fn-name">🔧 Call: ${escapeHtml(part.function_call.name)}</div>
+                                <div class="collapsible">
+                                    <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
+                                        Arguments <span class="arrow"></span>
+                                    </div>
+                                    <div class="collapsible-content">
+                                        <pre>${escapeHtml(JSON.stringify(part.function_call.args, null, 2))}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    if (part.function_response) {
+                        contentHtml += `
+                            <div class="fn-call" style="background: #f0fdf4; border-color: #bbf7d0;">
+                                <div class="fn-name" style="color: #15803d;">✅ Response: ${escapeHtml(part.function_response.name)}</div>
+                                <div class="collapsible">
+                                    <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
+                                        Return Value <span class="arrow"></span>
+                                    </div>
+                                    <div class="collapsible-content">
+                                        <pre>${escapeHtml(JSON.stringify(part.function_response.response, null, 2))}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                const row = document.createElement('div');
+                row.className = `message-row ${role}`;
+                
+                // Friendly role names
+                let roleName = role.toUpperCase();
+                if (role === 'user') roleName = 'SASHIKO';
+                if (role === 'model') roleName = 'LLM';
+                if (role === 'function' || role === 'tool') roleName = 'TOOL';
+
+                row.innerHTML = `
+                    <div class="message-bubble">
+                        <div class="role-badge">${roleName}</div>
+                        ${contentHtml}
+                    </div>
+                `;
+                chatContainer.appendChild(row);
+            });
+        }
+
+        function formatText(text) {
+            // Check if text is large (e.g. > 500 chars)
+            if (text.length > 1000) {
+                const preview = text.substring(0, 300);
+                const full = escapeHtml(text);
+                const uniqueId = Math.random().toString(36).substr(2, 9);
+                return `
+                    ${escapeHtml(preview)}...
+                    <div class="collapsible">
+                        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
+                            Show Full Text (${text.length} chars) <span class="arrow"></span>
+                        </div>
+                        <div class="collapsible-content">
+                            <pre>${full}</pre>
+                        </div>
+                    </div>
+                `;
+            }
+            return escapeHtml(text);
+        }
+
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        fetchLog();
+    </script>
+</body>
+</html>

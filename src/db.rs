@@ -1328,7 +1328,7 @@ impl Database {
                     "SELECT r.model_name, r.summary, r.created_at, ai.input_context, ai.output_raw, 
                             b.repo_url, b.branch, b.last_known_commit,
                             r.provider, r.prompts_git_hash, r.result_description,
-                            r.status, r.inline_review, r.logs, ai.tokens_in, ai.tokens_out, r.patch_id
+                            r.status, r.inline_review, r.logs, ai.tokens_in, ai.tokens_out, r.patch_id, r.id
                  FROM reviews r
                  LEFT JOIN ai_interactions ai ON r.interaction_id = ai.id
                  LEFT JOIN baselines b ON r.baseline_id = b.id
@@ -1359,6 +1359,7 @@ impl Database {
                     "tokens_in": r.get::<Option<u32>>(14).ok(),
                     "tokens_out": r.get::<Option<u32>>(15).ok(),
                     "patch_id": r.get::<Option<i64>>(16).ok(),
+                    "id": r.get::<i64>(17).ok(),
                 }));
             }
 
@@ -1434,6 +1435,50 @@ impl Database {
                 "patches": patches,
                 "thread": messages,
                 "subsystems": subsystems
+            })))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn get_review_details(&self, id: i64) -> Result<Option<serde_json::Value>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT r.id, r.model_name, r.summary, r.created_at, ai.input_context, ai.output_raw, 
+                        b.repo_url, b.branch, b.last_known_commit,
+                        r.provider, r.prompts_git_hash, r.result_description,
+                        r.status, r.inline_review, r.logs, ai.tokens_in, ai.tokens_out, r.patch_id
+             FROM reviews r
+             LEFT JOIN ai_interactions ai ON r.interaction_id = ai.id
+             LEFT JOIN baselines b ON r.baseline_id = b.id
+             WHERE r.id = ?",
+                libsql::params![id],
+            )
+            .await?;
+
+        if let Ok(Some(r)) = rows.next().await {
+            Ok(Some(serde_json::json!({
+                "id": r.get::<i64>(0)?,
+                "model": r.get::<Option<String>>(1).ok(),
+                "summary": r.get::<Option<String>>(2).ok(),
+                "created_at": r.get::<Option<i64>>(3).ok(),
+                "input": r.get::<Option<String>>(4).ok(),
+                "output": r.get::<Option<String>>(5).ok(),
+                "baseline": {
+                    "repo_url": r.get::<Option<String>>(6).ok(),
+                    "branch": r.get::<Option<String>>(7).ok(),
+                    "commit": r.get::<Option<String>>(8).ok(),
+                },
+                "provider": r.get::<Option<String>>(9).ok(),
+                "prompts_hash": r.get::<Option<String>>(10).ok(),
+                "result": r.get::<Option<String>>(11).ok(),
+                "status": r.get::<Option<String>>(12).ok(),
+                "inline_review": r.get::<Option<String>>(13).ok(),
+                "logs": r.get::<Option<String>>(14).ok(),
+                "tokens_in": r.get::<Option<u32>>(15).ok(),
+                "tokens_out": r.get::<Option<u32>>(16).ok(),
+                "patch_id": r.get::<Option<i64>>(17).ok(),
             })))
         } else {
             Ok(None)

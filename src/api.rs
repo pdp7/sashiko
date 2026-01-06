@@ -56,6 +56,7 @@ pub async fn run_server(
         .route("/api/messages", get(list_messages))
         .route("/api/patch", get(get_patchset))
         .route("/api/message", get(get_message))
+        .route("/api/review", get(get_review))
         .route("/api/stats", get(get_stats))
         .route("/", get_service(ServeFile::new("static/index.html")))
         .nest_service("/static", ServeDir::new("static"))
@@ -146,6 +147,28 @@ async fn get_patchset(
             info!("Database error: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
+    }
+}
+
+async fn get_review(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PatchQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if let Ok(id_val) = query.id.parse::<i64>() {
+        info!("Fetching details for review id: {}", id_val);
+        match state.db.get_review_details(id_val).await {
+            Ok(Some(details)) => Ok(Json(details)),
+            Ok(None) => {
+                info!("Review not found: {}", id_val);
+                Err(StatusCode::NOT_FOUND)
+            }
+            Err(e) => {
+                info!("Database error: {}", e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+    } else {
+        Err(StatusCode::BAD_REQUEST)
     }
 }
 

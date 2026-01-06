@@ -158,38 +158,11 @@
                     const uniqueId = Math.random().toString(36).substr(2, 9);
                     const detailsId = `review-details-${uniqueId}`;
                     
-                    let logsSection = '';
-                    if (r.logs) {
-                        logsSection = `
-                            <div style="margin-top: 10px;">
-                                <strong>Logs / Errors:</strong>
-                                <div class="log-block">${escapeHtml(r.logs, true)}</div>
-                            </div>
-                        `;
-                    }
-
-                    let inputSection = '';
-                    if (r.input) {
-                        inputSection = `
-                            <div style="margin-top: 10px;">
-                                <button class="toggle-btn" onclick="toggleDetails('input-${uniqueId}')">Show Input Context</button>
-                                <div id="input-${uniqueId}" class="review-details">
-                                    <div class="log-block" style="background:#eee; color:#333;">${escapeHtml(r.input)}</div>
-                                </div>
-                            </div>
-                        `;
-                    }
-                    
-                    let outputSection = '';
-                     if (r.output) {
-                        outputSection = `
-                            <div style="margin-top: 10px;">
-                                <button class="toggle-btn" onclick="toggleDetails('output-${uniqueId}')">Show Raw Output</button>
-                                <div id="output-${uniqueId}" class="review-details">
-                                    <div class="log-block" style="background:#eee; color:#333;">${escapeHtml(r.output)}</div>
-                                </div>
-                            </div>
-                        `;
+                    let logLink = '';
+                    if (r.id) {
+                        logLink = `<div style="margin-top: 10px;">
+                            <a href="/static/log.html?id=${r.id}" class="toggle-btn" style="text-decoration: none; border: 1px solid #ddd; padding: 5px 10px; border-radius: 4px; background: #f6f8fa;">📄 View Full Interaction Log</a>
+                        </div>`;
                     }
 
                     let inlineSection = '';
@@ -220,19 +193,10 @@
 
                             ${r.summary ? `<div class="review-summary">${escapeHtml(r.summary)}</div>` : ''}
                             ${inlineSection}
+                            ${logLink}
                             
                             <div class="token-stats">
                                 <strong>Token Usage:</strong> ${tokensIn.toLocaleString()} in + ${tokensOut.toLocaleString()} out = ${totalTokens.toLocaleString()} total
-                            </div>
-
-                            <div style="margin-top: 10px;">
-                                <button class="toggle-btn" onclick="toggleDetails('${detailsId}')">Show Details</button>
-                            </div>
-
-                            <div id="${detailsId}" class="review-details">
-                                ${logsSection}
-                                ${inputSection}
-                                ${outputSection}
                             </div>
                         </div>
                     `;
