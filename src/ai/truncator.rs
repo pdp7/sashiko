@@ -132,15 +132,15 @@ mod tests {
 
     #[test]
     fn test_truncate_code_focus() {
-        let code = (0..100)
+        let code = (0..200)
             .map(|i| format!("line {}", i))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let truncated = Truncator::truncate_code(&code, Some(50..55), 10);
-        // It should keep lines around 50-55.
-        assert!(truncated.contains("line 50"));
-        assert!(truncated.contains("line 55"));
+        let truncated = Truncator::truncate_code(&code, Some(100..105), 10);
+        // It should keep lines around 100-105.
+        assert!(truncated.contains("line 100"));
+        assert!(truncated.contains("line 105"));
         // It should have collapsed the start
         assert!(truncated.contains("lines collapsed"));
     }

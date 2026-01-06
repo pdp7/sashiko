@@ -1332,7 +1332,7 @@ impl Database {
                  LEFT JOIN ai_interactions ai ON r.interaction_id = ai.id
                  LEFT JOIN baselines b ON r.baseline_id = b.id
                  WHERE r.patchset_id = ?
-                 ORDER BY r.created_at DESC",
+                 ORDER BY r.created_at ASC",
                     libsql::params![pid],
                 )
                 .await?;

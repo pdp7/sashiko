@@ -1,9 +1,52 @@
 #[cfg(test)]
 mod tests {
     use crate::agent::{Agent, prompts::PromptRegistry, tools::ToolBox};
-    use crate::ai::gemini::GeminiClient;
+    use crate::ai::gemini::{
+        Candidate, Content, GenAiClient, GenerateContentRequest, GenerateContentResponse, Part,
+        UsageMetadata,
+    };
+    use async_trait::async_trait;
     use serde_json::json;
     use std::path::PathBuf;
+
+    struct MockClient;
+
+    #[async_trait]
+    impl GenAiClient for MockClient {
+        async fn generate_content(
+            &self,
+            _req: GenerateContentRequest,
+        ) -> anyhow::Result<GenerateContentResponse> {
+            let mock_response = json!({
+                "analysis_trace": ["Trace 1", "Trace 2"],
+                "summary": "Mock summary",
+                "score": 10,
+                "verdict": "Pass",
+                "findings": []
+            });
+
+            let content = Content {
+                role: "model".to_string(),
+                parts: vec![Part::Text {
+                    text: format!("```json\n{}\n```", mock_response.to_string()),
+                    thought_signature: None,
+                }],
+            };
+
+            Ok(GenerateContentResponse {
+                candidates: Some(vec![Candidate {
+                    content,
+                    finish_reason: Some("STOP".to_string()),
+                }]),
+                usage_metadata: Some(UsageMetadata {
+                    prompt_token_count: 10,
+                    candidates_token_count: Some(20),
+                    total_token_count: 30,
+                    extra: None,
+                }),
+            })
+        }
+    }
 
     fn get_test_paths() -> (PathBuf, PathBuf) {
         let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -15,25 +58,18 @@ mod tests {
     #[tokio::test]
     async fn test_agent_integration_sanity() {
         let _ = tracing_subscriber::fmt::try_init();
-        // Skip if no API key
-        if std::env::var("LLM_API_KEY").is_err() {
-            println!("Skipping AI integration test: LLM_API_KEY not set");
-            return;
-        }
 
         let (linux_path, prompts_path) = get_test_paths();
 
         // Setup dependencies
-        // Use flash model for tests to save cost/latency
-        let client = GeminiClient::new("gemini-3-flash-preview".to_string());
+        // Use MockClient to simulate LLM interaction without network/API key
+        let client = Box::new(MockClient);
         let tools = ToolBox::new(linux_path, prompts_path);
         let prompts = PromptRegistry::new(PathBuf::from("review-prompts"));
 
         let mut agent = Agent::new(client, tools, prompts, 150_000);
 
         // Create a dummy patchset that invites checking a file
-        // We hope the model decides to check README or similar.
-        // Even if it doesn't, we just want to ensure the loop runs and returns a result without crashing.
         let patchset = json!({
             "subject": "Documentation: Fix typo in README",
             "author": "Test User <test@example.com>",
@@ -50,26 +86,15 @@ mod tests {
         match result {
             Ok(agent_res) => {
                 if let Some(err) = agent_res.error {
-                    if err.contains("Agent exceeded maximum turns") {
-                        println!(
-                            "Agent reached max turns, which confirms it was running and using tools. Success."
-                        );
-                        return;
-                    }
                     panic!("Agent returned error: {}", err);
                 }
 
                 let review = agent_res
                     .output
                     .expect("Review output should be present on success");
-                let is_empty = match &review {
-                    serde_json::Value::Null => true,
-                    serde_json::Value::String(s) => s.is_empty(),
-                    serde_json::Value::Array(a) => a.is_empty(),
-                    serde_json::Value::Object(o) => o.is_empty(),
-                    _ => false,
-                };
-                assert!(!is_empty, "Review should not be empty");
+
+                assert_eq!(review["summary"], "Mock summary");
+                assert_eq!(review["verdict"], "Pass");
                 println!("Agent review output: {}", review);
             }
             Err(e) => {

@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     // Data Loading: Always from Stdin (JSON)
     let mut buffer = String::new();
     if std::io::stdin().read_line(&mut buffer)? == 0 {
-         anyhow::bail!("No input provided on stdin");
+        anyhow::bail!("No input provided on stdin");
     }
     let input: ReviewInput = serde_json::from_str(&buffer)?;
 
@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
                 "Patches applied. Starting AI review for {} patches...",
                 patches_to_review.len()
             );
-            
+
             let client = Box::new(sashiko::ai::gemini::StdioGeminiClient);
 
             let tools = ToolBox::new(worktree.path.clone(), args.prompts.clone());
