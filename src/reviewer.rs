@@ -283,7 +283,7 @@ impl Reviewer {
 
                     // Baseline preparation
                     let mut retries = 0;
-                    const MAX_RETRIES: i32 = 3;
+                    let max_retries = settings.review.max_retries;
 
                     // Now loop through patches
                     let mut candidate_success = true;
@@ -391,11 +391,11 @@ impl Reviewer {
                                                 )
                                                 .await;
 
-                                            if retries < MAX_RETRIES {
+                                            if retries < max_retries {
                                                 retries += 1;
                                                 warn!(
                                                     "AI failed for ps={} idx={}. Retrying (attempt {}/{})...",
-                                                    patchset_id, index, retries, MAX_RETRIES
+                                                    patchset_id, index, retries, max_retries
                                                 );
                                                 continue;
                                             } else {
@@ -467,11 +467,11 @@ impl Reviewer {
                                                         logs_str.as_deref(),
                                                     )
                                                     .await;
-                                                if retries < MAX_RETRIES {
+                                                if retries < max_retries {
                                                     retries += 1;
                                                     warn!(
                                                         "AI failed for ps={} idx={}. Retrying (attempt {}/{})...",
-                                                        patchset_id, index, retries, MAX_RETRIES
+                                                        patchset_id, index, retries, max_retries
                                                     );
                                                     continue;
                                                 } else {
@@ -502,8 +502,12 @@ impl Reviewer {
                                                     logs_str.as_deref(),
                                                 )
                                                 .await;
-                                            if retries < MAX_RETRIES {
+                                            if retries < max_retries {
                                                 retries += 1;
+                                                warn!(
+                                                    "Review content missing for ps={} idx={}. Retrying (attempt {}/{})...",
+                                                    patchset_id, index, retries, max_retries
+                                                );
                                                 continue;
                                             }
                                             final_status =
@@ -556,8 +560,12 @@ impl Reviewer {
                                         )
                                         .await;
                                     // Tool failure (e.g. binary crash). Retry?
-                                    if retries < MAX_RETRIES {
+                                    if retries < max_retries {
                                         retries += 1;
+                                        warn!(
+                                            "Tool execution failed for ps={} idx={}. Retrying (attempt {}/{})...",
+                                            patchset_id, index, retries, max_retries
+                                        );
                                         continue;
                                     }
                                     candidate_success = false;
@@ -679,7 +687,7 @@ async fn run_review_tool(
 
     // Perform interaction with timeout
     let interaction_result =
-        tokio::time::timeout(std::time::Duration::from_secs(1800), async {
+        tokio::time::timeout(std::time::Duration::from_secs(settings.review.timeout_seconds), async {
             // Send initial payload
             let mut input_str = serde_json::to_string(input_payload)?;
             input_str.push('\n');
@@ -875,13 +883,43 @@ async fn run_review_tool(
                     }
                     Ok(json)
                 }
-                Err(e) => Err(e),
+                Err(e) => {
+                    if let Some(idx) = review_index {
+                        let _ = db
+                            .update_patch_application_status(
+                                patchset_id,
+                                idx,
+                                "error",
+                                Some(&e.to_string()),
+                            )
+                            .await;
+                    }
+                    Err(e)
+                }
             }
         }
         Err(_) => {
             // Timeout occurred
-            error!("Review tool timed out after 30 minutes. Killing process.");
+            error!("Review tool timed out after {} seconds. Killing process.", settings.review.timeout_seconds);
             let _ = child.kill().await;
+
+            if let Some(idx) = review_index {
+                if let Err(e) = db
+                    .update_patch_application_status(
+                        patchset_id,
+                        idx,
+                        "error",
+                        Some("Review tool timed out"),
+                    )
+                    .await
+                {
+                    error!(
+                        "Failed to update patch status for ps={} idx={}: {}",
+                        patchset_id, idx, e
+                    );
+                }
+            }
+
             Err(anyhow::anyhow!("Review tool timed out"))
         }
     }

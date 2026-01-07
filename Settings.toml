@@ -23,3 +23,5 @@ repository_path = "linux"
 [review]
 concurrency = 1
 worktree_dir = "review_trees"
+timeout_seconds = 3600
+max_retries = 3

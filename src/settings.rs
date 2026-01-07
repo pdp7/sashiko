@@ -53,6 +53,18 @@ pub struct GitSettings {
 pub struct ReviewSettings {
     pub concurrency: usize,
     pub worktree_dir: String,
+    #[serde(default = "default_review_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+}
+
+fn default_review_timeout() -> u64 {
+    3600
+}
+
+fn default_max_retries() -> u32 {
+    3
 }
 
 #[derive(Debug, Deserialize, Clone)]
