@@ -755,8 +755,8 @@ async fn run_review_tool(
                                     .await;
                                 ai_started = true;
                             }
-                            if let Some(payload_val) = json_msg.get("payload")
-                                && let Ok(req) = serde_json::from_value::<GenerateContentRequest>(
+                            if let Some(payload_val) = json_msg.get("payload") {
+                                if let Ok(req) = serde_json::from_value::<GenerateContentRequest>(
                                     payload_val.clone(),
                                 ) {
                                     // Handle Standard AI Request
@@ -765,11 +765,10 @@ async fn run_review_tool(
                                         match client.generate_content_single(&req).await {
                                             Ok(resp) => break Ok(resp),
                                             Err(e) => {
-                                                if let Some(gemini_err) = e.downcast_ref::<GeminiError>()
-                                                    && let GeminiError::QuotaExceeded(d) = gemini_err {
-                                                        quota_manager.report_quota_error(*d).await;
-                                                        continue;
-                                                    }
+                                                if let Some(GeminiError::QuotaExceeded(d)) = e.downcast_ref::<GeminiError>() {
+                                                    quota_manager.report_quota_error(*d).await;
+                                                    continue;
+                                                }
                                                 break Err(e);
                                             }
                                         }
@@ -789,6 +788,7 @@ async fn run_review_tool(
                                     }
                                     let _ = stdin.flush().await;
                                 }
+                            }
                         } else if type_str == "ai_request_with_cache" {
                             if !ai_started {
                                 let _ = db
@@ -800,8 +800,8 @@ async fn run_review_tool(
                                     .await;
                                 ai_started = true;
                             }
-                            if let Some(payload_val) = json_msg.get("payload")
-                                && let Ok(req) =
+                            if let Some(payload_val) = json_msg.get("payload") {
+                                if let Ok(req) =
                                     serde_json::from_value::<GenerateContentWithCacheRequest>(
                                         payload_val.clone(),
                                     )
@@ -858,6 +858,7 @@ async fn run_review_tool(
                                     }
                                     let _ = stdin.flush().await;
                                 }
+                            }
                         } else {
                             // Unknown type? Assume it's result if it matches result structure?
                             if json_msg.get("patchset_id").is_some() {
@@ -940,8 +941,8 @@ async fn run_review_tool(
             );
             let _ = child.kill().await;
 
-            if let Some(idx) = review_index
-                && let Err(e) = db
+            if let Some(idx) = review_index {
+                if let Err(e) = db
                     .update_patch_application_status(
                         patchset_id,
                         idx,
@@ -949,11 +950,12 @@ async fn run_review_tool(
                         Some("Review tool timed out"),
                     )
                     .await
-            {
-                error!(
-                    "Failed to update patch status for ps={} idx={}: {}",
-                    patchset_id, idx, e
-                );
+                {
+                    error!(
+                        "Failed to update patch status for ps={} idx={}: {}",
+                        patchset_id, idx, e
+                    );
+                }
             }
 
             Err(anyhow::anyhow!("Review tool timed out"))

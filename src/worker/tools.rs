@@ -168,20 +168,23 @@ impl ToolBox {
         for file_args in files {
             let path_str = file_args["path"].as_str().unwrap_or_default();
             if path_str.is_empty() {
-                 results.push(json!({ "error": "Missing path" }));
-                 continue;
+                results.push(json!({ "error": "Missing path" }));
+                continue;
             }
-            
+
             let start_line = file_args["start_line"].as_u64().map(|v| v as usize);
             let end_line = file_args["end_line"].as_u64().map(|v| v as usize);
 
-            match self.read_single_file(path_str, start_line, end_line, mode).await {
+            match self
+                .read_single_file(path_str, start_line, end_line, mode)
+                .await
+            {
                 Ok(mut val) => {
-                     if let Some(obj) = val.as_object_mut() {
-                         obj.insert("path".to_string(), json!(path_str));
-                     }
-                     results.push(val);
-                },
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("path".to_string(), json!(path_str));
+                    }
+                    results.push(val);
+                }
                 Err(e) => {
                     results.push(json!({
                         "path": path_str,
@@ -190,11 +193,17 @@ impl ToolBox {
                 }
             }
         }
-        
+
         Ok(json!({ "results": results }))
     }
 
-    async fn read_single_file(&self, path_str: &str, start_line: Option<usize>, end_line: Option<usize>, mode: &str) -> Result<Value> {
+    async fn read_single_file(
+        &self,
+        path_str: &str,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+        mode: &str,
+    ) -> Result<Value> {
         let path = self.validate_path(path_str, &self.worktree_path)?;
         let content = fs::read_to_string(path).await?;
 

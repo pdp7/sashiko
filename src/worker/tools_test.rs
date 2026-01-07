@@ -40,7 +40,7 @@ mod tests {
         let result = rt.block_on(toolbox.call("read_files", args)).unwrap();
         let results = result["results"].as_array().unwrap();
         assert_eq!(results.len(), 1);
-        
+
         let content = results[0]["content"].as_str().unwrap();
 
         assert!(!content.is_empty());
