@@ -5,7 +5,7 @@ use crate::ai::gemini::{
 };
 use crate::ai::proxy::QuotaManager;
 use crate::baseline::{BaselineRegistry, BaselineResolution, extract_files_from_diff};
-use crate::db::{AiInteractionParams, Database};
+use crate::db::{AiInteractionParams, Database, ToolUsage};
 use crate::git_ops::{ensure_remote, get_commit_hash};
 use crate::settings::Settings;
 use anyhow::Result;
@@ -379,6 +379,36 @@ impl Reviewer {
                                     } else {
                                         None
                                     };
+
+                                    if let Some(h) = history.and_then(|h| h.as_array()) {
+                                        for item in h {
+                                            if let Some(parts) =
+                                                item.get("parts").and_then(|p| p.as_array())
+                                            {
+                                                for part in parts {
+                                                    if let Some(call) = part.get("functionCall") {
+                                                        let name = call["name"]
+                                                            .as_str()
+                                                            .unwrap_or("unknown");
+                                                        let args = call["args"].to_string();
+                                                        let _ = db
+                                                            .create_tool_usage(ToolUsage {
+                                                                review_id,
+                                                                provider: settings
+                                                                    .ai
+                                                                    .provider
+                                                                    .clone(),
+                                                                model: settings.ai.model.clone(),
+                                                                tool_name: name.to_string(),
+                                                                arguments: Some(args),
+                                                                output_length: 0,
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
 
                                     if target_applied {
                                         if let Some(error_msg) = json_output["error"].as_str() {

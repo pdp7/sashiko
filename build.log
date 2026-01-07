@@ -1,0 +1,147 @@
+   Compiling sashiko v0.1.0 (/home/guro/sashiko)
+error: cannot find macro `json` in this scope
+   --> src/db.rs:612:12
+    |
+612 |         Ok(json!(stats))
+    |            ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:604:24
+    |
+604 |             stats.push(json!({
+    |                        ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:591:12
+    |
+591 |         Ok(json!(stats))
+    |            ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:584:24
+    |
+584 |             stats.push(json!({
+    |                        ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:569:12
+    |
+569 |         Ok(json!({
+    |            ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:565:27
+    |
+565 |                     .push(json!({"day": d, "status": status.unwrap_or_default(), "count": count}));
+    |                           ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error: cannot find macro `json` in this scope
+   --> src/db.rs:544:36
+    |
+544 |                 messages_data.push(json!({"day": d, "count": count}));
+    |                                    ^^^^
+    |
+help: consider importing this macro
+    |
+  1 + use serde_json::json;
+    |
+
+error[E0308]: `if` and `else` have incompatible types
+   --> src/db.rs:535:13
+    |
+532 |           let params = if let Some(sid) = subsystem_id {
+    |  ______________________-
+533 | |             libsql::params![sid]
+    | |             -------------------- expected because of this
+534 | |         } else {
+535 | |             libsql::params![]
+    | |             ^^^^^^^^^^^^^^^^^ expected `[Result<Value, Error>; 1]`, found `()`
+536 | |         };
+    | |_________- `if` and `else` have incompatible types
+    |
+    = note:  expected array `[Result<libsql::Value, libsql::Error>; 1]`
+            found unit type `()`
+    = note: this error originates in the macro `libsql::params` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0282]: type annotations needed
+   --> src/db.rs:538:13
+    |
+538 |         let mut rows = self.conn.query(sql_msgs, params.clone()).await?;
+    |             ^^^^^^^^
+539 |         let mut messages_data = Vec::new();
+540 |         while let Ok(Some(row)) = rows.next().await {
+    |                                   ---- type must be known at this point
+    |
+help: consider giving `rows` an explicit type
+    |
+538 |         let mut rows: /* Type */ = self.conn.query(sql_msgs, params.clone()).await?;
+    |                     ++++++++++++
+
+error[E0282]: type annotations needed
+   --> src/db.rs:541:39
+    |
+541 |             let day: Option<String> = row.get(0).ok();
+    |                                       ^^^ cannot infer type
+
+error[E0282]: type annotations needed
+   --> src/db.rs:557:13
+    |
+557 |         let mut rows = self.conn.query(sql_patchsets, params).await?;
+    |             ^^^^^^^^
+558 |         let mut patchsets_data = Vec::new();
+559 |         while let Ok(Some(row)) = rows.next().await {
+    |                                   ---- type must be known at this point
+    |
+help: consider giving `rows` an explicit type
+    |
+557 |         let mut rows: /* Type */ = self.conn.query(sql_patchsets, params).await?;
+    |                     ++++++++++++
+
+error[E0282]: type annotations needed
+   --> src/db.rs:560:39
+    |
+560 |             let day: Option<String> = row.get(0).ok();
+    |                                       ^^^ cannot infer type
+
+warning: unused variable: `resp`
+   --> src/db.rs:508:41
+    |
+508 | ...                   if let Some(resp) = part.get("functionResponse") {
+    |                                   ^^^^ help: if this is intentional, prefix it with an underscore: `_resp`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0282, E0308.
+For more information about an error, try `rustc --explain E0282`.
+warning: `sashiko` (lib) generated 1 warning
+error: could not compile `sashiko` (lib) due to 12 previous errors; 1 warning emitted

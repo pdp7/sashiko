@@ -184,3 +184,16 @@ CREATE TABLE IF NOT EXISTS patchsets_tags (
     FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_patchsets_cover_message_id ON patchsets(cover_letter_message_id);
+
+CREATE TABLE IF NOT EXISTS tool_usages (
+    id INTEGER PRIMARY KEY,
+    review_id INTEGER NOT NULL,
+    provider TEXT,
+    model TEXT,
+    tool_name TEXT,
+    arguments TEXT,
+    output_length INTEGER,
+    created_at INTEGER,
+    FOREIGN KEY(review_id) REFERENCES reviews(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_usages_review ON tool_usages(review_id);

@@ -519,7 +519,47 @@
             color: #d73a49;
             padding: 20px;
         }
+
+        /* Stats & Charts */
+        .chart-section {
+            margin-bottom: 30px;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border: 1px solid var(--border-light);
+        }
+
+
+        .stat-card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #fff;
+            border: 1px solid var(--border);
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        .stat-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+        }
+
+        .stat-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: var(--text);
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 </head>
 
 <body>
@@ -567,6 +607,9 @@
             if (logMatch) {
                 return { view: 'log', id: logMatch[1] };
             }
+            if (hash === '#/stats') {
+                return { view: 'stats' };
+            }
             return { view: 'list' };
         }
 
@@ -603,6 +646,9 @@
                         break;
                     case 'log':
                         await renderLogView(route.id);
+                        break;
+                    case 'stats':
+                        await renderStatsView();
                         break;
                     default:
                         await renderListView();
@@ -649,6 +695,23 @@
             });
         }
 
+        function renderStatCard(title, value) {
+            return `
+                <div class="stat-card">
+                    <h3>${escapeHtml(title)}</h3>
+                    <div class="value">${escapeHtml(String(value))}</div>
+                </div>
+            `;
+        }
+
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
         function toggleCollapsible(id, btn) {
             const el = document.getElementById(id);
             if (el.classList.contains('open')) {
@@ -667,12 +730,17 @@
             const app = document.getElementById('app');
 
             app.innerHTML = `
-                <h1>Sashiko</h1>
+                <h1>
+                    <span style="display:flex; align-items:center;">
+                        <img src="static/logo.svg" style="height: 1.2em; margin-right: 8px;">
+                        Sashiko
+                    </span>
+                </h1>
                 <div class="controls">
                     <input type="text" id="searchInput" placeholder="Search (subject, author:, date:)" value="${escapeHtml(state.searchQuery)}">
                     <button onclick="triggerSearch()">Search</button>
                     <button onclick="clearSearch()">Clear</button>
-                    <span style="margin-left: auto;"></span>
+                    <div style="flex:1"></div>
                     <button id="btn-patchsets" onclick="setListMode('patchsets')" class="${state.listMode === 'patchsets' ? 'active' : ''}">Patchsets</button>
                     <button id="btn-messages" onclick="setListMode('messages')" class="${state.listMode === 'messages' ? 'active' : ''}">Messages</button>
                 </div>
@@ -786,11 +854,12 @@
                 const b = data.breakdown || {};
                 document.getElementById('stats').innerHTML = `
                     ${data.status} (v${data.version}) · 
-                    Msgs: ${data.messages} · Patches: ${data.patchsets} · 
+                    Msgs: ${data.messages} · Patchsets: ${data.patchsets} · 
                     <b>Pending:</b> ${b.pending || 0} · 
                     <b>Review:</b> ${b.reviewing || 0} · 
                     <b>Done:</b> ${b.reviewed || 0}
                     <span style="opacity:0.6">(Applied: ${b.applied || 0}, Failed: ${b.failed || 0}, Incomplete: ${b.incomplete || 0})</span>
+                    · <a href="#/stats">📊 Statistics</a>
                 `;
             } catch (e) {
                 document.getElementById('stats').innerHTML = 'Stats unavailable';
@@ -1309,6 +1378,178 @@
         // =====================================================================
         // INIT
         // =====================================================================
+        // =====================================================================
+        // STATS VIEW
+        // =====================================================================
+        async function renderStatsView() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="nav"><a href="#/" onclick="event.preventDefault(); goBack();">← Back</a></div>
+                <h1>Statistics</h1>
+                <div id="stats-content" class="loading">Loading stats...</div>
+            `;
+
+            try {
+                const [timeline, reviews, tools] = await Promise.all([
+                    fetch('/api/stats/timeline').then(r => r.json()),
+                    fetch('/api/stats/reviews').then(r => r.json()),
+                    fetch('/api/stats/tools').then(r => r.json())
+                ]);
+
+                // Colors
+                const colors = {
+                    primary: '#5470c6',
+                    secondary: '#91cc75',
+                    patchset: '#fac858',
+                    individual_patches: '#5ab1ef', // Light Blue/Teal
+                    failure: '#ee6666',
+                    text: '#666'
+                };
+
+                // HTML Structure
+                let html = '<h2>Activity Timeline</h2><div class="chart-section"><div id="chart-timeline" style="width:100%; height:300px;"></div></div>';
+
+                // Summary Cards
+                html += '<h2>AI Reviews</h2>';
+                html += '<div class="stat-card-grid">';
+                const totalReviews = reviews.reduce((acc, r) => acc + r.count, 0);
+                const successful = reviews.filter(r => r.status === 'Reviewed').reduce((acc, r) => acc + r.count, 0);
+                const failed = reviews.filter(r => r.status.toLowerCase().includes('failed') || r.status.toLowerCase().includes('error')).reduce((acc, r) => acc + r.count, 0);
+                html += renderStatCard('Total Reviews', totalReviews);
+                html += renderStatCard('Success Rate', totalReviews ? Math.round(successful / totalReviews * 100) + '%' : '-');
+                html += renderStatCard('Failures', failed);
+                html += '</div>';
+
+                html += '<h3>Reviews Breakdown</h3><div class="chart-section"><div id="chart-reviews" style="width:100%; height:400px;"></div></div>';
+
+                html += '<h2>Tool Usage</h2><div class="chart-section"><div id="chart-tools" style="width:100%; height:500px;"></div></div>';
+
+                const container = document.getElementById('stats-content');
+                container.innerHTML = html;
+                container.classList.remove('loading');
+
+                // --- 1. Timeline Chart ---
+                if (timeline.messages && timeline.messages.length) {
+                    const chart = echarts.init(document.getElementById('chart-timeline'));
+                    const dates = [...new Set([
+                        ...timeline.messages.map(m => m.day),
+                        ...timeline.patchsets.map(p => p.day),
+                        ...(timeline.patches || []).map(p => p.day)
+                    ])].sort();
+
+                    const msgData = dates.map(d => timeline.messages.find(m => m.day === d)?.count || 0);
+                    const patchsetData = dates.map(d => timeline.patchsets.filter(p => p.day === d).reduce((a, b) => a + b.count, 0));
+                    const patchesData = dates.map(d => timeline.patches?.find(p => p.day === d)?.count || 0);
+
+                    const option = {
+                        color: [colors.primary, colors.individual_patches, colors.patchset],
+                        tooltip: { trigger: 'axis', backgroundColor: 'rgba(255, 255, 255, 0.9)', borderColor: '#eee', borderWidth: 1, textStyle: { color: '#333' } },
+                        legend: { data: ['Messages', 'Patches', 'Patchsets'], bottom: 0 },
+                        grid: { left: '3%', right: '4%', bottom: '10%', top: '10%', containLabel: true, show: true, borderColor: '#eee' },
+                        xAxis: { type: 'category', data: dates, splitLine: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } },
+                        yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
+                        series: [
+                            { name: 'Messages', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 3 }, data: msgData, itemStyle: { color: colors.primary } },
+                            { name: 'Patches', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 3 }, data: patchesData, itemStyle: { color: colors.individual_patches } },
+                            { name: 'Patchsets', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 3 }, data: patchsetData, itemStyle: { color: colors.patchset } }
+                        ]
+                    };
+                    chart.setOption(option);
+                    window.addEventListener('resize', () => chart.resize());
+                } else {
+                    document.getElementById('chart-timeline').innerHTML = '<p class="loading">No timeline data available.</p>';
+                }
+
+                // --- 2. Reviews Chart ---
+                if (reviews && reviews.length) {
+                    const chart = echarts.init(document.getElementById('chart-reviews'));
+                    // Group by model
+                    const models = [...new Set(reviews.map(r => `${r.provider}/${r.model}`))];
+                    const statuses = [...new Set(reviews.map(r => r.status))];
+
+                    // Custom color mapping
+                    const getColor = (s) => {
+                        if (s === 'Reviewed') return colors.secondary;
+                        if (s.toLowerCase().includes('failed')) return colors.failure;
+                        return colors.primary;
+                    };
+
+                    // Stacked bar
+                    const series = statuses.map(s => {
+                        return {
+                            name: s,
+                            type: 'bar',
+                            stack: 'total',
+                            itemStyle: { color: getColor(s) },
+                            data: models.map(m => {
+                                const [prov, mod] = m.split('/');
+                                const entry = reviews.find(r => r.provider === prov && r.model === mod && r.status === s);
+                                return entry ? entry.count : 0;
+                            })
+                        };
+                    });
+
+                    const option = {
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        legend: { data: statuses, bottom: 0 },
+                        grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
+                        xAxis: { type: 'category', data: models, axisLabel: { rotate: 25, interval: 0, color: colors.text } },
+                        yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
+                        series: series
+                    };
+                    chart.setOption(option);
+                    window.addEventListener('resize', () => chart.resize());
+                } else {
+                    document.getElementById('chart-reviews').innerHTML = '<p class="loading">No review data available.</p>';
+                }
+
+                // --- 3. Tool Usage Chart ---
+                if (tools && tools.length) {
+                    const chart = echarts.init(document.getElementById('chart-tools'));
+                    // Group by tool name
+                    const toolStats = {};
+                    tools.forEach(t => {
+                        if (!toolStats[t.tool]) toolStats[t.tool] = 0;
+                        toolStats[t.tool] += t.count;
+                    });
+
+                    const toolNames = Object.keys(toolStats).sort((a, b) => toolStats[a] - toolStats[b]); // Sort ascending for bar chart
+                    const values = toolNames.map(t => toolStats[t]);
+
+                    const option = {
+                        tooltip: { trigger: 'axis' },
+                        grid: { left: '3%', right: '4%', bottom: '5%', top: '5%', containLabel: true },
+                        xAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
+                        yAxis: { type: 'category', data: toolNames, axisLabel: { color: colors.text } },
+                        series: [
+                            {
+                                name: 'Count',
+                                type: 'bar',
+                                data: values,
+                                itemStyle: {
+                                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                                        { offset: 0, color: '#83bff6' },
+                                        { offset: 0.5, color: '#188df0' },
+                                        { offset: 1, color: '#188df0' }
+                                    ]),
+                                    borderRadius: [0, 4, 4, 0]
+                                }
+                            }
+                        ]
+                    };
+                    chart.setOption(option);
+                    window.addEventListener('resize', () => chart.resize());
+                } else {
+                    document.getElementById('chart-tools').innerHTML = '<p class="loading">No tool usage data available.</p>';
+                }
+
+
+            } catch (e) {
+                console.error(e);
+                document.getElementById('stats-content').innerHTML = `<div class="error">Error loading stats: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
         router();
     </script>
 </body>

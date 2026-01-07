@@ -45,6 +45,11 @@ pub struct PatchQuery {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+pub struct SubsystemQuery {
+    pub subsystem_id: Option<i64>,
+}
+
 pub async fn run_server(
     settings: ServerSettings,
     db: Arc<Database>,
@@ -58,6 +63,9 @@ pub async fn run_server(
         .route("/api/message", get(get_message))
         .route("/api/review", get(get_review))
         .route("/api/stats", get(get_stats))
+        .route("/api/stats/timeline", get(stats_timeline))
+        .route("/api/stats/reviews", get(stats_reviews))
+        .route("/api/stats/tools", get(stats_tools))
         .route("/", get_service(ServeFile::new("static/index.html")))
         .nest_service("/static", ServeDir::new("static"))
         .with_state(state);
@@ -271,4 +279,39 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value
             "incomplete": incomplete
         }
     }))
+}
+
+async fn stats_timeline(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<SubsystemQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let data = state
+        .db
+        .get_timeline_stats(params.subsystem_id)
+        .await
+        .map_err(|e| {
+            info!("Error getting timeline stats: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(data))
+}
+
+async fn stats_reviews(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let data = state.db.get_review_stats().await.map_err(|e| {
+        info!("Error getting review stats: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(data))
+}
+
+async fn stats_tools(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let data = state.db.get_tool_usage_stats().await.map_err(|e| {
+        info!("Error getting tool stats: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(data))
 }

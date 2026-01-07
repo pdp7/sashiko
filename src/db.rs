@@ -3,6 +3,7 @@ use crate::settings::DatabaseSettings;
 use anyhow::Result;
 use libsql::Builder;
 use serde::Serialize;
+use serde_json::json;
 use tracing::info;
 
 pub struct Database {
@@ -67,6 +68,15 @@ pub struct AiInteractionParams<'a> {
     pub output: &'a str,
     pub tokens_in: u32,
     pub tokens_out: u32,
+}
+
+pub struct ToolUsage {
+    pub review_id: i64,
+    pub provider: String,
+    pub model: String,
+    pub tool_name: String,
+    pub arguments: Option<String>,
+    pub output_length: i64,
 }
 
 impl Database {
@@ -276,6 +286,28 @@ impl Database {
             .try_add_column("reviews", "inline_review", "TEXT")
             .await;
 
+        let _ = self
+            .conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS tool_usages (
+                    id INTEGER PRIMARY KEY,
+                    review_id INTEGER NOT NULL,
+                    provider TEXT,
+                    model TEXT,
+                    tool_name TEXT,
+                    arguments TEXT,
+                    output_length INTEGER,
+                    created_at INTEGER,
+                    FOREIGN KEY(review_id) REFERENCES reviews(id)
+                )",
+                (),
+            )
+            .await;
+        let _ = self
+            .try_create_index("idx_tool_usages_review", "tool_usages", "review_id")
+            .await;
+
+        let _ = self.migrate_tool_usages().await;
         Ok(())
     }
 
@@ -397,6 +429,228 @@ impl Database {
             ],
         ).await?;
         Ok(())
+    }
+
+    pub async fn create_tool_usage(&self, usage: ToolUsage) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO tool_usages (review_id, provider, model, tool_name, arguments, output_length, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            libsql::params![
+                usage.review_id,
+                usage.provider,
+                usage.model,
+                usage.tool_name,
+                usage.arguments,
+                usage.output_length,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64
+            ],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn migrate_tool_usages(&self) -> Result<()> {
+        // 1. Check if we have logs to parse
+        info!("Migration: Checking for tool usages to backfill...");
+        let mut rows = self.conn.query("SELECT id, logs, provider, model_name FROM reviews WHERE status IN ('Reviewed', 'Failed') AND logs IS NOT NULL", ()).await?;
+
+        while let Ok(Some(row)) = rows.next().await {
+            let review_id: i64 = row.get(0)?;
+            let logs: String = row.get(1)?;
+            let provider: String = row.get(2).unwrap_or_else(|_| "unknown".to_string());
+            let model: String = row.get(3).unwrap_or_else(|_| "unknown".to_string());
+
+            // Check if already populated
+            let count_rows = self
+                .conn
+                .query(
+                    "SELECT count(*) FROM tool_usages WHERE review_id = ?",
+                    libsql::params![review_id],
+                )
+                .await;
+            if let Ok(mut c_rows) = count_rows {
+                if let Ok(Some(c_row)) = c_rows.next().await {
+                    let count: i64 = c_row.get(0)?;
+                    if count > 0 {
+                        continue;
+                    }
+                }
+            }
+
+            // Parse logs (simple JSON array parsing)
+            if let Ok(history) = serde_json::from_str::<Vec<serde_json::Value>>(&logs) {
+                for item in history {
+                    if let Some(parts) = item.get("parts").and_then(|p| p.as_array()) {
+                        for part in parts {
+                            // Check for function call
+                            if let Some(call) = part.get("functionCall") {
+                                let name = call["name"].as_str().unwrap_or("unknown");
+                                let args = call["args"].to_string();
+                                // We need to find the response to get output length.
+                                // But here we iterate linearly.
+                                // Let's just estimate or find next part?
+                                // Simplification: just record usage without output length for now?
+                                // Or try to find corresponding functionResponse in next parts/items?
+                                // actually the history interleaves them.
+
+                                // For now, let's insert what we have.
+                                let _ = self
+                                    .create_tool_usage(ToolUsage {
+                                        review_id,
+                                        provider: provider.clone(),
+                                        model: model.clone(),
+                                        tool_name: name.to_string(),
+                                        arguments: Some(args),
+                                        output_length: 0, // Placeholder
+                                    })
+                                    .await;
+                            }
+                            // If we want exact output length, we need to match functionResponse.
+                            // But that might be complex for this simple migration.
+                            if let Some(_resp) = part.get("functionResponse") {
+                                // We could update the previous entry?
+                                // Or just ignore output length for backfill.
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        info!("Migration: verified tool usages.");
+        Ok(())
+    }
+
+    pub async fn get_timeline_stats(&self, subsystem_id: Option<i64>) -> Result<serde_json::Value> {
+        let mut messages_data = Vec::new();
+
+        if let Some(sid) = subsystem_id {
+            let sql_msgs =
+                "SELECT strftime('%Y-%m-%d', date, 'unixepoch') as day, count(*) FROM messages m
+             JOIN messages_subsystems ms ON m.id = ms.message_id
+             WHERE ms.subsystem_id = ?
+             GROUP BY day ORDER BY day";
+            let mut rows = self.conn.query(sql_msgs, libsql::params![sid]).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let count: i64 = row.get(1)?;
+                    messages_data.push(json!({"day": day, "count": count}));
+                }
+            }
+        } else {
+            let sql_msgs = "SELECT strftime('%Y-%m-%d', date, 'unixepoch') as day, count(*) FROM messages GROUP BY day ORDER BY day";
+            let mut rows = self.conn.query(sql_msgs, ()).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let count: i64 = row.get(1)?;
+                    messages_data.push(json!({"day": day, "count": count}));
+                }
+            }
+        }
+
+        let mut patchsets_data = Vec::new();
+        if let Some(sid) = subsystem_id {
+            let sql = "SELECT strftime('%Y-%m-%d', date, 'unixepoch') as day, status, count(*) FROM patchsets p
+             JOIN patchsets_subsystems ps ON p.id = ps.patchset_id
+             WHERE ps.subsystem_id = ?
+             GROUP BY day, status ORDER BY day";
+            let mut rows = self.conn.query(sql, libsql::params![sid]).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let status: Option<String> = row.get(1).ok();
+                    let count: i64 = row.get(2)?;
+                    patchsets_data.push(
+                        json!({"day": day, "status": status.unwrap_or_default(), "count": count}),
+                    );
+                }
+            }
+        } else {
+            let sql = "SELECT strftime('%Y-%m-%d', date, 'unixepoch') as day, status, count(*) FROM patchsets GROUP BY day, status ORDER BY day";
+            let mut rows = self.conn.query(sql, ()).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let status: Option<String> = row.get(1).ok();
+                    let count: i64 = row.get(2)?;
+                    patchsets_data.push(
+                        json!({"day": day, "status": status.unwrap_or_default(), "count": count}),
+                    );
+                }
+            }
+        }
+
+        // Patches stats (individual patches)
+        let mut patches_data = Vec::new();
+        if let Some(sid) = subsystem_id {
+            let sql =
+                "SELECT strftime('%Y-%m-%d', m.date, 'unixepoch') as day, count(*) FROM patches p
+              JOIN messages m ON p.message_id = m.message_id
+              JOIN patches_subsystems ps ON p.id = ps.patch_id
+              WHERE ps.subsystem_id = ?
+              GROUP BY day ORDER BY day";
+            let mut rows = self.conn.query(sql, libsql::params![sid]).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let count: i64 = row.get(1)?;
+                    patches_data.push(json!({"day": day, "count": count}));
+                }
+            }
+        } else {
+            let sql =
+                "SELECT strftime('%Y-%m-%d', m.date, 'unixepoch') as day, count(*) FROM patches p
+              JOIN messages m ON p.message_id = m.message_id
+              GROUP BY day ORDER BY day";
+            let mut rows = self.conn.query(sql, ()).await?;
+            while let Ok(Some(row)) = rows.next().await {
+                if let Ok(day) = row.get::<String>(0) {
+                    let count: i64 = row.get(1)?;
+                    patches_data.push(json!({"day": day, "count": count}));
+                }
+            }
+        }
+
+        Ok(json!({
+            "messages": messages_data,
+            "patchsets": patchsets_data,
+            "patches": patches_data
+        }))
+    }
+
+    pub async fn get_review_stats(&self) -> Result<serde_json::Value> {
+        let sql = "SELECT provider, model_name, status, count(*) FROM reviews GROUP BY provider, model_name, status";
+        let mut rows = self.conn.query(sql, ()).await?;
+        let mut stats = Vec::new();
+        while let Ok(Some(row)) = rows.next().await {
+            let provider: Option<String> = row.get(0).ok();
+            let model: Option<String> = row.get(1).ok();
+            let status: Option<String> = row.get(2).ok();
+            let count: i64 = row.get(3)?;
+            stats.push(json!({
+                "provider": provider.unwrap_or_default(),
+                "model": model.unwrap_or_default(),
+                "status": status.unwrap_or_default(),
+                "count": count
+            }));
+        }
+        Ok(json!(stats))
+    }
+
+    pub async fn get_tool_usage_stats(&self) -> Result<serde_json::Value> {
+        let sql = "SELECT provider, model, tool_name, count(*), avg(output_length) FROM tool_usages GROUP BY provider, model, tool_name";
+        let mut rows = self.conn.query(sql, ()).await?;
+        let mut stats = Vec::new();
+        while let Ok(Some(row)) = rows.next().await {
+            let provider: Option<String> = row.get(0).ok();
+            let model: Option<String> = row.get(1).ok();
+            let tool_name: Option<String> = row.get(2).ok();
+            let count: i64 = row.get(3)?;
+            let avg_len: f64 = row.get(4).unwrap_or(0.0);
+            stats.push(json!({
+                "provider": provider.unwrap_or_default(),
+                "model": model.unwrap_or_default(),
+                "tool": tool_name.unwrap_or_default(),
+                "count": count,
+                "avg_output_length": avg_len
+            }));
+        }
+        Ok(json!(stats))
     }
 
     pub async fn begin_transaction(&self) -> Result<()> {
