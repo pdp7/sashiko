@@ -798,7 +798,7 @@
             if (!thead) return;
 
             if (state.listMode === 'patchsets') {
-                thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:50px">Parts</th><th style="width:100px">Date</th><th style="width:90px">Regressions</th><th style="width:80px">Status</th></tr>`;
+                thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:100px">Date</th><th style="width:50px">Parts</th><th style="width:80px">Status</th><th style="width:90px">Found</th></tr>`;
             } else {
                 thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:100px">Date</th><th style="width:30px"></th></tr>`;
             }
@@ -828,20 +828,13 @@
 
                 // Parse author
                 let authorName = p.author || 'unknown';
-                let authorEmail = '';
                 const emailMatch = authorName.match(/^(.*?)\s*<(.+)>$/);
                 if (emailMatch) {
                     authorName = emailMatch[1].trim();
-                    authorEmail = emailMatch[2].trim();
-                } else if (authorName.includes('@')) {
-                    // Just an email?
-                    authorEmail = authorName;
-                    authorName = '';
                 }
 
                 const authorHtml = `
                     <div>${escapeHtml(authorName)}</div>
-                    <div style="color:#666; font-size:0.9em;">${escapeHtml(authorEmail)}</div>
                 `;
 
                 if (state.listMode === 'patchsets') {
@@ -866,10 +859,10 @@
                     row.innerHTML = `
                         <td>${escapeHtml(p.subject) || '(no subject)'}${tagsHtml}</td>
                         <td style="line-height:1.2;">${authorHtml}</td>
-                        <td>${parts}</td>
                         <td>${date}</td>
-                        <td style="${regStyle}">${regText}</td>
+                        <td>${parts}</td>
                         <td><span class="status-badge status-${p.status}">${p.status || 'Pending'}</span></td>
+                        <td style="${regStyle}">${regText}</td>
                     `;
                 } else {
                     row.onclick = (e) => {
