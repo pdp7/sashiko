@@ -275,6 +275,7 @@
         .status-dot.status-Reviewed { background-color: #22863a; }
         .status-dot.status-Failed { background-color: #d73a49; }
         .status-dot.status-Cancelled { background-color: #6a737d; }
+        .status-dot.status-Incomplete { background-color: #6a737d; }
 
         /* Stats Footer */
         .stats {
@@ -1000,6 +1001,9 @@
                         </div>
                         <div class="stats-group" title="Failed">
                             <span class="status-dot status-Failed"></span> ${b.failed || 0}
+                        </div>
+                        <div class="stats-group" title="Incomplete (waiting for parts)">
+                            <span class="status-dot status-Incomplete"></span> ${b.incomplete || 0}
                         </div>
                          <div class="stats-group" title="Cancelled">
                             <span class="status-dot status-Cancelled"></span> ${b.cancelled || 0}
