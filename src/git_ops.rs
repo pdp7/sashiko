@@ -523,7 +523,7 @@ mod tests {
             .append(true)
             .open(&file_path)?;
         writeln!(file, "Change 1")?;
-        
+
         Command::new("git")
             .current_dir(&repo_path)
             .args(["commit", "-am", "Second commit"])

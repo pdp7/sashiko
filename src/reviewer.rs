@@ -5,7 +5,7 @@ use crate::ai::gemini::{
 };
 use crate::ai::proxy::QuotaManager;
 use crate::baseline::{BaselineRegistry, BaselineResolution, extract_files_from_diff};
-use crate::db::{AiInteractionParams, Database, ToolUsage, PatchsetRow};
+use crate::db::{AiInteractionParams, Database, PatchsetRow, ToolUsage};
 use crate::git_ops::{ensure_remote, get_commit_hash};
 use crate::settings::Settings;
 use anyhow::Result;
@@ -275,14 +275,9 @@ impl Reviewer {
         let mut any_patch_failed_to_apply = false;
 
         for candidate in candidates {
-            let (success, failed_apply) = Self::process_candidate(
-                &ctx,
-                &candidate,
-                patchset_id,
-                &diffs,
-                &input_payload,
-            )
-            .await;
+            let (success, failed_apply) =
+                Self::process_candidate(&ctx, &candidate, patchset_id, &diffs, &input_payload)
+                    .await;
 
             if failed_apply {
                 any_patch_failed_to_apply = true;
@@ -306,7 +301,11 @@ impl Reviewer {
             "Review process finished for {}: {}",
             patchset_id, final_status
         );
-        if let Err(e) = ctx.db.update_patchset_status(patchset_id, &final_status).await {
+        if let Err(e) = ctx
+            .db
+            .update_patchset_status(patchset_id, &final_status)
+            .await
+        {
             error!("Failed to update status for {}: {}", patchset_id, e);
         }
     }
@@ -334,10 +333,7 @@ impl Reviewer {
                     patchset_id, name, url
                 );
                 if let Err(e) = ensure_remote(&repo_path, name, url, false).await {
-                    error!(
-                        "Failed to fetch remote {}: {}. Skipping candidate.",
-                        url, e
-                    );
+                    error!("Failed to fetch remote {}: {}. Skipping candidate.", url, e);
                     return (false, false);
                 }
             }
@@ -472,8 +468,7 @@ impl Reviewer {
                             if let Some(parts) = item.get("parts").and_then(|p| p.as_array()) {
                                 for part in parts {
                                     if let Some(call) = part.get("functionCall") {
-                                        let name =
-                                            call["name"].as_str().unwrap_or("unknown");
+                                        let name = call["name"].as_str().unwrap_or("unknown");
                                         let args = call["args"].to_string();
                                         let _ = ctx
                                             .db
@@ -524,8 +519,7 @@ impl Reviewer {
                         } else if let Some(review_content) = json_output.get("review") {
                             if !review_content.is_null() {
                                 let interaction_id = generate_id();
-                                let input_ctx =
-                                    json_output["input_context"].as_str().unwrap_or("");
+                                let input_ctx = json_output["input_context"].as_str().unwrap_or("");
                                 let output_raw = review_content.to_string();
 
                                 let _ = ctx
@@ -538,12 +532,10 @@ impl Reviewer {
                                         model: &ctx.settings.ai.model,
                                         input: input_ctx,
                                         output: &output_raw,
-                                        tokens_in: json_output["tokens_in"]
-                                            .as_u64()
-                                            .unwrap_or(0) as u32,
-                                        tokens_out: json_output["tokens_out"]
-                                            .as_u64()
-                                            .unwrap_or(0) as u32,
+                                        tokens_in: json_output["tokens_in"].as_u64().unwrap_or(0)
+                                            as u32,
+                                        tokens_out: json_output["tokens_out"].as_u64().unwrap_or(0)
+                                            as u32,
                                     })
                                     .await;
 
@@ -626,9 +618,8 @@ impl Reviewer {
                             }
                         }
                     } else {
-                        let patches_debug =
-                            serde_json::to_string_pretty(&json_output["patches"])
-                                .unwrap_or_default();
+                        let patches_debug = serde_json::to_string_pretty(&json_output["patches"])
+                            .unwrap_or_default();
                         let error_msg = json_output["error"]
                             .as_str()
                             .unwrap_or("Patch application failed");
