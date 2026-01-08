@@ -799,7 +799,7 @@
             if (!thead) return;
 
             if (state.listMode === 'patchsets') {
-                thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:100px">Date</th><th style="width:50px">Parts</th><th style="width:80px">Status</th><th style="width:90px">Found</th></tr>`;
+                thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:100px">Date</th><th style="width:50px">Parts</th><th style="width:80px">Status</th><th style="width:90px">PR</th></tr>`;
             } else {
                 thead.innerHTML = `<tr><th>Subject</th><th style="width:180px">Author</th><th style="width:100px">Date</th><th style="width:30px"></th></tr>`;
             }
@@ -873,9 +873,9 @@
                         <td><div>${escapeHtml(p.subject) || '(no subject)'}</div>${tagsHtml}</td>
                         <td style="line-height:1.2;">${authorHtml}</td>
                         <td style="line-height:1.2;">${dateHtml}</td>
-                        <td>${parts}</td>
-                        <td><span class="status-badge status-${p.status}">${p.status || 'Pending'}</span></td>
-                        <td style="${regStyle}">${regText}</td>
+                        <td style="vertical-align: middle;">${parts}</td>
+                        <td style="vertical-align: middle;"><span class="status-badge status-${p.status}">${p.status || 'Pending'}</span></td>
+                        <td style="${regStyle} vertical-align: middle;">${regText}</td>
                     `;
                 } else {
                     row.onclick = (e) => {
