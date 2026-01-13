@@ -190,7 +190,10 @@ impl Worker {
                             "properties": {
                                 "file": { "type": "string" },
                                 "line": { "type": "integer" },
-                                "severity": { "type": "string" },
+                                "severity": {
+                                    "type": "string",
+                                    "enum": ["Low", "Medium", "High", "Critical"]
+                                },
                                 "message": { "type": "string" },
                                 "suggestion": { "type": "string" }
                             },

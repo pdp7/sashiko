@@ -621,7 +621,13 @@ impl Database {
         if let Some(sid) = subsystem_id {
             let sql = "SELECT 
                 strftime('%Y-%m-%d', ai.created_at, 'unixepoch') as day,
-                lower(json_extract(value, '$.severity')) as severity,
+                CASE 
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'low%' THEN 'low'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'medium%' THEN 'medium'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'high%' THEN 'high'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'critical%' THEN 'critical'
+                    ELSE lower(json_extract(value, '$.severity'))
+                END as severity,
                 COUNT(*) as count
             FROM ai_interactions ai
             JOIN reviews r ON ai.id = r.interaction_id
@@ -641,7 +647,13 @@ impl Database {
         } else {
             let sql = "SELECT 
                 strftime('%Y-%m-%d', ai.created_at, 'unixepoch') as day,
-                lower(json_extract(value, '$.severity')) as severity,
+                CASE 
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'low%' THEN 'low'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'medium%' THEN 'medium'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'high%' THEN 'high'
+                    WHEN lower(json_extract(value, '$.severity')) LIKE 'critical%' THEN 'critical'
+                    ELSE lower(json_extract(value, '$.severity'))
+                END as severity,
                 COUNT(*) as count
             FROM ai_interactions ai
             , json_each(ai.output_raw, '$.findings')
@@ -1558,10 +1570,10 @@ impl Database {
              LEFT JOIN subsystems s ON ps.subsystem_id = s.id
              LEFT JOIN (
                 SELECT r.patchset_id,
-                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) = 'low' THEN 1 ELSE 0 END) as low,
-                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) = 'medium' THEN 1 ELSE 0 END) as medium,
-                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) = 'high' THEN 1 ELSE 0 END) as high,
-                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) = 'critical' THEN 1 ELSE 0 END) as critical
+                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) LIKE 'low%' THEN 1 ELSE 0 END) as low,
+                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) LIKE 'medium%' THEN 1 ELSE 0 END) as medium,
+                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) LIKE 'high%' THEN 1 ELSE 0 END) as high,
+                    SUM(CASE WHEN lower(json_extract(value, '$.severity')) LIKE 'critical%' THEN 1 ELSE 0 END) as critical
                 FROM reviews r 
                 JOIN ai_interactions ai ON r.interaction_id = ai.id
                 , json_each(ai.output_raw, '$.findings')
