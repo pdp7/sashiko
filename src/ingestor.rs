@@ -51,12 +51,60 @@ impl Ingestor {
         let mut work_done = false;
 
         if let Some(msg_ids) = &self.message_ids {
+            // Try to connect to NNTP for batch ingestion
+            let mut nntp_client = match NntpClient::connect(
+                &self.settings.nntp.server,
+                self.settings.nntp.port,
+            )
+            .await
+            {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    warn!(
+                        "Failed to connect to NNTP for batch ingestion: {}. Falling back to HTTP.",
+                        e
+                    );
+                    None
+                }
+            };
+
             for msg_id in msg_ids {
                 info!("Ingesting specific message: {}", msg_id);
-                if let Err(e) = self.ingest_message_by_id(msg_id).await {
-                    error!("Failed to ingest message {}: {}", msg_id, e);
+                let mut ingested = false;
+
+                if let Some(client) = &mut nntp_client {
+                    let nntp_id = format!("<{}>", msg_id);
+                    match client.article(&nntp_id).await {
+                        Ok(lines) => {
+                            self.sender
+                                .send(Event::ArticleFetched {
+                                    group: "manual".to_string(),
+                                    article_id: msg_id.clone(),
+                                    content: lines,
+                                    raw: None,
+                                    baseline: self.baseline.clone(),
+                                })
+                                .await?;
+                            info!("Successfully ingested message {} via NNTP", msg_id);
+                            ingested = true;
+                        }
+                        Err(e) => {
+                            warn!("NNTP fetch failed for {}: {}", msg_id, e);
+                        }
+                    }
+                }
+
+                if !ingested {
+                    if let Err(e) = self.ingest_message_by_id(msg_id).await {
+                        error!("Failed to ingest message {}: {}", msg_id, e);
+                    }
                 }
             }
+
+            if let Some(mut client) = nntp_client {
+                let _ = client.quit().await;
+            }
+
             work_done = true;
         }
 

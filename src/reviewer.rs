@@ -5,7 +5,7 @@ use crate::ai::gemini::{
 };
 use crate::ai::proxy::QuotaManager;
 use crate::baseline::{BaselineRegistry, BaselineResolution, extract_files_from_diff};
-use crate::db::{AiInteractionParams, Database, PatchsetRow, ToolUsage, Finding, Severity};
+use crate::db::{AiInteractionParams, Database, Finding, PatchsetRow, Severity, ToolUsage};
 use crate::git_ops::{ensure_remote, get_commit_hash};
 use crate::settings::Settings;
 use anyhow::Result;
@@ -504,7 +504,8 @@ impl Reviewer {
                     }
 
                     // Always try to record AI interaction stats if available, even on failure
-                    let interaction_id = if let Some(tokens_in) = json_output["tokens_in"].as_u64() {
+                    let interaction_id = if let Some(tokens_in) = json_output["tokens_in"].as_u64()
+                    {
                         let i_id = generate_id();
                         let input_ctx = json_output["input_context"].as_str().unwrap_or("");
                         let output_raw = if let Some(r) = json_output.get("review") {
@@ -575,8 +576,7 @@ impl Reviewer {
                                         let file_path =
                                             f["file"].as_str().unwrap_or("unknown").to_string();
                                         let line_number = f["line"].as_i64().unwrap_or(0);
-                                        let severity_str =
-                                            f["severity"].as_str().unwrap_or("Low");
+                                        let severity_str = f["severity"].as_str().unwrap_or("Low");
                                         let message =
                                             f["message"].as_str().unwrap_or("").to_string();
                                         let suggestion =

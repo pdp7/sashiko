@@ -586,15 +586,21 @@ impl Database {
                    FROM reviews r 
                    JOIN ai_interactions ai ON r.interaction_id = ai.id
                    WHERE r.status = 'Reviewed'";
-        
+
         let mut rows = self.conn.query(sql, ()).await?;
-        
+
         while let Ok(Some(row)) = rows.next().await {
             let review_id: i64 = row.get(0)?;
             let output_raw: String = row.get(1)?;
-            
+
             // Check if we already have findings for this review
-            let count_check = self.conn.query("SELECT count(*) FROM findings WHERE review_id = ?", libsql::params![review_id]).await;
+            let count_check = self
+                .conn
+                .query(
+                    "SELECT count(*) FROM findings WHERE review_id = ?",
+                    libsql::params![review_id],
+                )
+                .await;
             if let Ok(mut c_rows) = count_check {
                 if let Ok(Some(c_row)) = c_rows.next().await {
                     let count: i64 = c_row.get(0)?;
@@ -603,7 +609,7 @@ impl Database {
                     }
                 }
             }
-            
+
             // Parse JSON and insert findings
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&output_raw) {
                 if let Some(findings_arr) = json_val.get("findings").and_then(|f| f.as_array()) {
@@ -613,17 +619,19 @@ impl Database {
                         let severity_str = f["severity"].as_str().unwrap_or("Low");
                         let message = f["message"].as_str().unwrap_or("").to_string();
                         let suggestion = f["suggestion"].as_str().map(|s| s.to_string());
-                        
+
                         let severity = Severity::from_str(severity_str);
-                        
-                        let _ = self.create_finding(Finding {
-                            review_id,
-                            file_path,
-                            line_number,
-                            severity,
-                            message,
-                            suggestion,
-                        }).await;
+
+                        let _ = self
+                            .create_finding(Finding {
+                                review_id,
+                                file_path,
+                                line_number,
+                                severity,
+                                message,
+                                suggestion,
+                            })
+                            .await;
                     }
                 }
             }
