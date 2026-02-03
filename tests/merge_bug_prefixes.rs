@@ -17,7 +17,10 @@ async fn test_merge_prefixes_mismatch_should_split() {
     let db = setup_db().await;
 
     // 1. Create Thread 1
-    let t1 = db.create_thread("root_prefix_1", "Subject A", 1000).await.unwrap();
+    let t1 = db
+        .create_thread("root_prefix_1", "Subject A", 1000)
+        .await
+        .unwrap();
 
     // 2. Create Patchset A - Part 1/2 with Prefix "net-next"
     let ps1 = db
@@ -42,7 +45,10 @@ async fn test_merge_prefixes_mismatch_should_split() {
         .unwrap();
 
     // 3. Create Thread 2 (Different thread context)
-    let t2 = db.create_thread("root_prefix_2", "Subject B", 1010).await.unwrap();
+    let t2 = db
+        .create_thread("root_prefix_2", "Subject B", 1010)
+        .await
+        .unwrap();
 
     // 4. Create Patchset B - Part 2/2 with NO Prefix
     // Same author, same total, close time.
@@ -78,7 +84,10 @@ async fn test_merge_prefixes_mismatch_should_split() {
 async fn test_merge_prefixes_match_should_merge() {
     let db = setup_db().await;
 
-    let t1 = db.create_thread("root_prefix_match", "Subject", 2000).await.unwrap();
+    let t1 = db
+        .create_thread("root_prefix_match", "Subject", 2000)
+        .await
+        .unwrap();
 
     // [PATCH net-next 1/2]
     let ps1 = db
@@ -103,7 +112,10 @@ async fn test_merge_prefixes_match_should_merge() {
         .unwrap();
 
     // Create Thread 2
-    let t2 = db.create_thread("root_prefix_match_2", "Subject C", 2010).await.unwrap();
+    let t2 = db
+        .create_thread("root_prefix_match_2", "Subject C", 2010)
+        .await
+        .unwrap();
 
     // [PATCH net-next 2/2]
     let ps2 = db
@@ -127,8 +139,5 @@ async fn test_merge_prefixes_match_should_merge() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(
-        ps1, ps2,
-        "Matching prefixes (net-next) should merge"
-    );
+    assert_eq!(ps1, ps2, "Matching prefixes (net-next) should merge");
 }

@@ -169,7 +169,8 @@ fn parse_subject_index(subject: &str) -> (u32, u32) {
 
     static RE_LOOSE: OnceLock<Regex> = OnceLock::new();
     // Match PATCH M/N or RFC M/N (case insensitive)
-    let re_loose = RE_LOOSE.get_or_init(|| Regex::new(r"(?i)\b(?:PATCH|RFC|RESEND)\s+(\d+)/(\d+)\b").unwrap());
+    let re_loose =
+        RE_LOOSE.get_or_init(|| Regex::new(r"(?i)\b(?:PATCH|RFC|RESEND)\s+(\d+)/(\d+)\b").unwrap());
 
     if let Some(caps) = re_loose.captures(subject) {
         if let (Some(i), Some(t)) = (caps.get(1), caps.get(2)) {
@@ -178,7 +179,7 @@ fn parse_subject_index(subject: &str) -> (u32, u32) {
             return (index, total);
         }
     }
-    
+
     // Check cleaned subject for "1/2" at start (Handles "[PATCH] 1/2")
     let cleaned = clean_subject(subject);
     static RE_START: OnceLock<Regex> = OnceLock::new();
@@ -229,8 +230,12 @@ pub fn get_subject_prefixes(subject: &str) -> Vec<String> {
             // Split by whitespace/non-word chars?
             // "PATCH net-next 1/2" -> "PATCH", "net-next", "1/2"
             // "PATCH,net-next,1/2" -> "PATCH", "net-next", "1/2"
-            let tokens: Vec<&str> = content.as_str().split(|c: char| !c.is_alphanumeric() && c != '-' && c != '.' && c != '_').filter(|s| !s.is_empty()).collect();
-            
+            let tokens: Vec<&str> = content
+                .as_str()
+                .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '.' && c != '_')
+                .filter(|s| !s.is_empty())
+                .collect();
+
             for token in tokens {
                 let lower = token.to_lowercase();
                 // Ignore standard tags
@@ -245,7 +250,7 @@ pub fn get_subject_prefixes(subject: &str) -> Vec<String> {
                 if token.chars().all(|c| c.is_ascii_digit()) {
                     continue;
                 }
-                
+
                 prefixes.push(token.to_string());
             }
         }
@@ -337,10 +342,14 @@ mod tests {
 
     #[test]
     fn test_chinese_reply() {
-        let raw = b"Message-ID: <reply>\r\nSubject: \xE5\x9B\x9E\xE5\xA4\x8D: [PATCH] fix\r\n\r\nBody";
+        let raw =
+            b"Message-ID: <reply>\r\nSubject: \xE5\x9B\x9E\xE5\xA4\x8D: [PATCH] fix\r\n\r\nBody";
         // \xE5\x9B\x9E\xE5\xA4\x8D is "回复" in UTF-8.
         let (meta, _) = parse_email(raw).unwrap();
-        assert!(!meta.is_patch_or_cover, "Chinese reply should not be a patchset");
+        assert!(
+            !meta.is_patch_or_cover,
+            "Chinese reply should not be a patchset"
+        );
     }
 
     #[test]
@@ -411,7 +420,10 @@ mod tests {
         let raw = b"Message-ID: <cover_with_diff>\r\nSubject: [PATCH 0/5] fix bug\r\n\r\nExplanation:\ndiff --git a/file b/file\nindex...";
         let (meta, patch) = parse_email(raw).unwrap();
         assert!(meta.is_patch_or_cover);
-        assert!(patch.is_none(), "Cover letter (index 0) with diff should NOT be a patch");
+        assert!(
+            patch.is_none(),
+            "Cover letter (index 0) with diff should NOT be a patch"
+        );
     }
 
     #[test]
@@ -525,7 +537,7 @@ mod tests {
         let (index, total) = parse_subject_index(subject);
         assert_eq!(index, 1);
         assert_eq!(total, 2);
-        
+
         // Case 4: Regression test for false positive (508/512)
         let subject = "[PATCH v3] serial: 8250_pci: Fix broken RS485 for F81504/508/512";
         let (index, total) = parse_subject_index(subject);
@@ -535,13 +547,25 @@ mod tests {
 
     #[test]
     fn test_get_subject_prefixes() {
-        assert_eq!(get_subject_prefixes("[PATCH net-next 1/2]"), vec!["net-next"]);
-        assert_eq!(get_subject_prefixes("[PATCH v2 bpf-next]"), vec!["bpf-next"]);
+        assert_eq!(
+            get_subject_prefixes("[PATCH net-next 1/2]"),
+            vec!["net-next"]
+        );
+        assert_eq!(
+            get_subject_prefixes("[PATCH v2 bpf-next]"),
+            vec!["bpf-next"]
+        );
         assert_eq!(get_subject_prefixes("[PATCH RFC]"), Vec::<String>::new());
         assert_eq!(get_subject_prefixes("[PATCH 00/10]"), Vec::<String>::new()); // numbers ignored
         assert_eq!(get_subject_prefixes("[PATCH 6.18]"), vec!["6.18"]);
-        assert_eq!(get_subject_prefixes("[PATCH net-next v3 0/1]"), vec!["net-next"]);
-        assert_eq!(get_subject_prefixes("[PATCH net-next,bpf 1/2]"), vec!["bpf", "net-next"]); // sorted
+        assert_eq!(
+            get_subject_prefixes("[PATCH net-next v3 0/1]"),
+            vec!["net-next"]
+        );
+        assert_eq!(
+            get_subject_prefixes("[PATCH net-next,bpf 1/2]"),
+            vec!["bpf", "net-next"]
+        ); // sorted
         assert_eq!(get_subject_prefixes("[PATCH]"), Vec::<String>::new());
     }
 }

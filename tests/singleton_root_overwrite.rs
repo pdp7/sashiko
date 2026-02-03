@@ -20,7 +20,21 @@ async fn test_singleton_root_overwrite_prevention() {
     let t1 = db.ensure_thread_for_message(root_id, 1000).await.unwrap();
 
     // Create message msg_2 (Part 2)
-    db.create_message("msg_2", t1, Some(root_id), "Author", "[PATCH 2/3] Part 2", 1010, "body", "", "", None, None).await.unwrap();
+    db.create_message(
+        "msg_2",
+        t1,
+        Some(root_id),
+        "Author",
+        "[PATCH 2/3] Part 2",
+        1010,
+        "body",
+        "",
+        "",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     // 1. Ingest Part 2/3 first (Reply to Root)
     // This creates the patchset with inferred total=3, cover=root_id
@@ -44,7 +58,7 @@ async fn test_singleton_root_overwrite_prevention() {
         .await
         .unwrap()
         .unwrap();
-    
+
     // Add the patch
     db.create_patch(ps_id, "msg_2", 2, "diff").await.unwrap();
 
@@ -61,7 +75,7 @@ async fn test_singleton_root_overwrite_prevention() {
             "[PATCH] Singleton Root",
             "Author",
             1000, // Arrived earlier physically, but processed later
-            1, // Claims 1/1
+            1,    // Claims 1/1
             0,
             "",
             "",

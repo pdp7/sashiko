@@ -111,7 +111,12 @@ mod tests {
 
         let result = rt.block_on(toolbox.call("write_file", args));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Permission denied"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Permission denied")
+        );
     }
 
     #[test]

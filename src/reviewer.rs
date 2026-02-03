@@ -78,9 +78,7 @@ impl Reviewer {
         // Initialize CacheManager
         // Assuming prompts are in "review-prompts/kernel" in CWD.
         let prompts_dir = PathBuf::from("review-prompts/kernel");
-        let client = Box::new(GeminiClient::new(
-            settings.ai.model.clone(),
-        ));
+        let client = Box::new(GeminiClient::new(settings.ai.model.clone()));
 
         // We need tool definitions for the cache.
         // We use dummy paths for ToolBox here because we only need declarations,
