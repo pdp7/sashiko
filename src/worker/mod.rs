@@ -177,8 +177,7 @@ impl Worker {
         let mut total_tokens_in = 0;
         let mut total_tokens_out = 0;
         let mut total_tokens_cached = 0;
-        let mut last_tool_call: Option<(String, Value)> = None;
-        let mut consecutive_tool_count = 0;
+        let mut session_tool_history: Vec<(String, Value)> = Vec::new();
 
         // Track the final state of history for the last turn
         let mut final_history_before_pruning = Vec::new();
@@ -344,36 +343,50 @@ impl Worker {
                         has_calls = true;
                         debug!("Tool Call: {} args: {}", call.name, call.args);
 
-                        if let Some((last_name, last_args)) = &last_tool_call {
-                            if *last_name == call.name && *last_args == call.args {
-                                consecutive_tool_count += 1;
-                            } else {
-                                consecutive_tool_count = 1;
-                                last_tool_call = Some((call.name.clone(), call.args.clone()));
+                        // Loop Detection & Prevention
+                        let same_call_count = session_tool_history
+                            .iter()
+                            .filter(|(n, a)| *n == call.name && *a == call.args)
+                            .count();
+
+                        if same_call_count > 0 {
+                            // Strict check for write_file: No duplicates allowed.
+                            if call.name == "write_file" {
+                                let error_msg = "Duplicate Action: You have already executed this write_file command with identical arguments in this session. Proceed to the next step.";
+                                debug!("Blocking duplicate write_file call");
+
+                                function_responses.push(Part::FunctionResponse {
+                                    function_response: FunctionResponse {
+                                        name: call.name.clone(),
+                                        response: json!({ "error": error_msg }),
+                                    },
+                                });
+                                session_tool_history.push((call.name.clone(), call.args.clone()));
+                                continue;
                             }
-                        } else {
-                            consecutive_tool_count = 1;
-                            last_tool_call = Some((call.name.clone(), call.args.clone()));
+
+                            // For other tools, allow some repetition but prevent infinite loops (e.g. > 5 times)
+                            if same_call_count >= 5 {
+                                let error_msg = format!(
+                                    "Loop detected: Tool '{}' called with same arguments {} times. Terminating.",
+                                    call.name, same_call_count + 1
+                                );
+                                warn!("{}", error_msg);
+                                return Ok(WorkerResult {
+                                    output: None,
+                                    error: Some(error_msg),
+                                    input_context: input_context.clone(),
+                                    history: self.history.clone(),
+                                    history_before_pruning: final_history_before_pruning,
+                                    history_after_pruning: final_history_after_pruning,
+                                    tokens_in: total_tokens_in,
+                                    tokens_out: total_tokens_out,
+                                    tokens_cached: total_tokens_cached,
+                                });
+                            }
                         }
 
-                        if consecutive_tool_count >= 3 {
-                            let error_msg = format!(
-                                "Loop detected: Tool '{}' called with same arguments 3 times in a row. Terminating.",
-                                call.name
-                            );
-                            warn!("{}", error_msg);
-                            return Ok(WorkerResult {
-                                output: None,
-                                error: Some(error_msg),
-                                input_context: input_context.clone(),
-                                history: self.history.clone(),
-                                history_before_pruning: final_history_before_pruning,
-                                history_after_pruning: final_history_after_pruning,
-                                tokens_in: total_tokens_in,
-                                tokens_out: total_tokens_out,
-                                tokens_cached: total_tokens_cached,
-                            });
-                        }
+                        session_tool_history.push((call.name.clone(), call.args.clone()));
 
                         let result = match self.tools.call(&call.name, call.args.clone()).await {
                             Ok(val) => val,

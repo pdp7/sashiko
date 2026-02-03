@@ -573,7 +573,6 @@ mod tests {
 
         // Commit 2
         let mut file = std::fs::OpenOptions::new()
-            .write(true)
             .append(true)
             .open(&file_path)?;
         writeln!(file, "Change 1")?;

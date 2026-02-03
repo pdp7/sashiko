@@ -266,7 +266,11 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
         let (linux_path, _prompts_path) = get_test_paths();
 
+        // New logic requires >= 5 repetitions (so 6th call triggers it) for non-write_file tools.
         let client = Box::new(StatefulMockClient::new(vec![
+            create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
+            create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
+            create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
             create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
             create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
             create_tool_call_response("read_files", json!({ "files": [{ "path": "README" }] })),
@@ -292,5 +296,54 @@ mod tests {
         let err_msg = result.error.unwrap();
         assert!(err_msg.contains("Loop detected"));
         assert!(err_msg.contains("read_files"));
+    }
+
+    #[tokio::test]
+    async fn test_write_file_duplicate_prevention() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let (linux_path, _prompts_path) = get_test_paths();
+
+        // 1. write_file (Success)
+        // 2. write_file (Duplicate -> Blocked by worker, returns Error to LLM)
+        // 3. LLM sees error and finishes.
+        let client = Box::new(StatefulMockClient::new(vec![
+            create_tool_call_response("write_file", json!({ "path": "review-inline.txt", "content": "test" })),
+            create_tool_call_response("write_file", json!({ "path": "review-inline.txt", "content": "test" })),
+            create_text_response("```json\n{\"summary\": \"Done\", \"score\": 0, \"verdict\": \"Pass\", \"findings\": [], \"analysis_trace\": []}\n```"),
+        ]));
+
+        let tools = ToolBox::new(linux_path, None);
+        let prompts = PromptRegistry::new(PathBuf::from("review-prompts/kernel"));
+        let mut worker = Worker::new(client, tools, prompts, 150_000, 25, 1.0, None);
+
+        let patchset = json!({
+            "subject": "Write Loop Test",
+            "author": "Test",
+            "patches": []
+        });
+
+        let result = worker.run(patchset).await.expect("Worker run failed");
+
+        // The worker should NOT terminate with error, but handle the duplicate gracefully.
+        assert!(result.error.is_none());
+        assert!(result.output.is_some());
+
+        // Verify history contains the blocking error
+        // History indices:
+        // 0: User Task
+        // 1: Model Call 1 (write)
+        // 2: Tool Res 1 (Success)
+        // 3: Model Call 2 (write duplicate)
+        // 4: Tool Res 2 (Error)
+        
+        assert!(result.history.len() >= 5);
+        let tool_res_2 = &result.history[4];
+        if let Part::FunctionResponse { function_response } = &tool_res_2.parts[0] {
+             assert_eq!(function_response.name, "write_file");
+             let err = function_response.response["error"].as_str().expect("Response should have error");
+             assert!(err.contains("Duplicate Action"));
+        } else {
+            panic!("Expected FunctionResponse at index 4");
+        }
     }
 }

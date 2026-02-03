@@ -1670,7 +1670,7 @@ impl Database {
             };
 
             // Prefix matching (to separate different series from same author)
-            let same_thread = existing_thread_id.map_or(false, |tid| tid == thread_id);
+            let same_thread = existing_thread_id == Some(thread_id);
             let prefix_match = if same_thread {
                 true // Trust thread
             } else {
