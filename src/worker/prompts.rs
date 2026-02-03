@@ -60,7 +60,7 @@ impl PromptRegistry {
         } else {
             let review_core = self.get_review_core().await?;
             Ok(format!(
-                "{} Using the prompt review-prompts/review-core.md run a deep dive regression analysis of the top commit in the Linux source tree.\n\n\
+                "{} Using the prompt review-prompts/kernel/review-core.md run a deep dive regression analysis of the top commit in the Linux source tree.\n\n\
                  ## Review Protocol (review-core.md)\n\
                  {}\n\n\
                  IMPORTANT: If you find regressions, you MUST use the `write_file` tool to create `review-inline.txt` as specified in the protocol.",
@@ -107,7 +107,7 @@ impl PromptRegistry {
             context.push_str("\n\n");
         }
 
-        // 3. Subsystem guidelines (root md files)
+        // 3. Subsystem guidelines (root md files and subdirectories)
         context.push_str("# Subsystem Guidelines\n\n");
 
         let mut entries = fs::read_dir(&self.base_dir).await?;
@@ -117,8 +117,20 @@ impl PromptRegistry {
         }
         paths.sort(); // Deterministic order
 
+        // Directories to exclude from subsystem scan (patterns is handled separately)
+        const EXCLUDED_DIRS: &[&str] = &[
+            "scripts",
+            "docs",
+            "examples",
+            "skills",
+            "slash-commands",
+            "agent",
+            "patterns",
+            ".git",
+        ];
+
         for path in paths {
-            if path.extension().is_some_and(|ext| ext == "md") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "md") {
                 let fname = path.file_name().unwrap().to_string_lossy();
                 if EXCLUDED_FILES.contains(&fname.as_ref()) {
                     continue;
@@ -126,6 +138,28 @@ impl PromptRegistry {
                 context.push_str(&format!("## {}\n", fname));
                 context.push_str(&fs::read_to_string(&path).await?);
                 context.push_str("\n\n");
+            } else if path.is_dir() {
+                let dir_name = path.file_name().unwrap().to_string_lossy();
+                if EXCLUDED_DIRS.contains(&dir_name.as_ref()) {
+                    continue;
+                }
+
+                // Recursively read .md files in this directory
+                let mut sub_entries = fs::read_dir(&path).await?;
+                let mut sub_paths = Vec::new();
+                while let Some(entry) = sub_entries.next_entry().await? {
+                    sub_paths.push(entry.path());
+                }
+                sub_paths.sort();
+
+                for sub_path in sub_paths {
+                    if sub_path.extension().is_some_and(|ext| ext == "md") {
+                        let fname = sub_path.file_name().unwrap().to_string_lossy();
+                        context.push_str(&format!("## {}/{}\n", dir_name, fname));
+                        context.push_str(&fs::read_to_string(&sub_path).await?);
+                        context.push_str("\n\n");
+                    }
+                }
             }
         }
 
@@ -279,5 +313,32 @@ mod tests {
         assert!(prompt.contains(SYSTEM_IDENTITY));
         assert!(prompt.contains("## Review Protocol"));
         assert!(prompt.contains("Protocol content"));
+    }
+
+    #[tokio::test]
+    async fn test_build_context_recursive_subsystems() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Create a root-level subsystem file
+        std::fs::write(root.join("root_sub.md"), "Root Content").unwrap();
+
+        // Create a valid nested subsystem
+        let sub_dir = root.join("valid_sub");
+        std::fs::create_dir(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("rule1.md"), "Rule 1 Content").unwrap();
+
+        // Create an excluded directory
+        let script_dir = root.join("scripts");
+        std::fs::create_dir(&script_dir).unwrap();
+        std::fs::write(script_dir.join("ignore_me.md"), "Ignored Content").unwrap();
+
+        let registry = PromptRegistry::new(root.to_path_buf());
+        let context = registry.build_context().await.unwrap();
+
+        assert!(context.contains("Root Content"));
+        assert!(context.contains("## valid_sub/rule1.md"));
+        assert!(context.contains("Rule 1 Content"));
+        assert!(!context.contains("Ignored Content"));
     }
 }

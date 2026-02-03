@@ -26,7 +26,7 @@ struct Args {
     #[arg(long)]
     worktree_dir: Option<PathBuf>,
 
-    #[arg(long, default_value = "review-prompts")]
+    #[arg(long, default_value = "review-prompts/kernel")]
     prompts: PathBuf,
 
     /// If set, only review the patch with this index (1-based usually).

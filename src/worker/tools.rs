@@ -145,7 +145,7 @@ impl ToolBox {
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "name": { "type": "string", "description": "Name of the prompt file relative to review-prompts directory." }
+                        "name": { "type": "string", "description": "Name of the prompt file relative to configured prompts directory (e.g. review-prompts/kernel)." }
                     },
                     "required": ["name"]
                 }),

@@ -76,8 +76,8 @@ impl Reviewer {
         };
 
         // Initialize CacheManager
-        // Assuming prompts are in "review-prompts" in CWD.
-        let prompts_dir = PathBuf::from("review-prompts");
+        // Assuming prompts are in "review-prompts/kernel" in CWD.
+        let prompts_dir = PathBuf::from("review-prompts/kernel");
         let client = Box::new(GeminiClient::new(
             settings.ai.model.clone(),
             settings.ai.rate_limit_tokens_per_minute,
