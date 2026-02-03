@@ -422,6 +422,13 @@
             font-weight: bold;
         }
 
+        .ai-comment {
+            background-color: #ffffff;
+            border-left: 3px solid #283593;
+            padding-left: 12px;
+            font-weight: 500;
+        }
+
         /* Thread tree */
         .thread-tree {
             font-size: 0.95em;
@@ -751,23 +758,117 @@
                 .replace(/'/g, "&#039;");
 
             if (highlightDiff) {
-                let isDiff = false;
-                return escaped.split('\n').map(line => {
-                    // Heuristic: only start highlighting after we see a diff header
-                    if (!isDiff) {
-                        if (line.startsWith('diff --git') || line.startsWith('Index: ') || line.startsWith('--- ') || line.startsWith('@@ ')) {
-                            isDiff = true;
+                const lines = escaped.split('\n');
+                const hasQuotes = lines.some(l => l.trimStart().startsWith('&gt;')); // Escaped >
+                let inDiffBlock = false;
+                let seenDiffOrQuote = false;
+                
+                // Pass 1: Classify
+                const classified = lines.map(line => {
+                    const trimmed = line.trimStart();
+                    const isQuoted = trimmed.startsWith('&gt;');
+                    
+                    let content = line;
+                    if (isQuoted) {
+                        content = trimmed.substring(4); 
+                        if (content.startsWith(' ')) content = content.substring(1);
+                    }
+                    
+                    const isHeader = content.startsWith('diff --git') || 
+                                     content.startsWith('Index: ') || 
+                                     content.startsWith('--- ') || 
+                                     content.startsWith('+++ ') || 
+                                     content.startsWith('@@ ');
+                    
+                    if (isHeader || isQuoted) {
+                        seenDiffOrQuote = true;
+                    }
+
+                    const isMeta = content.match(/^(commit [0-9a-f]+|Author:|Date:|Subject:|From:|To:|Cc:|Signed-off-by:)/i);
+                    const isSkip = /^\s*\[\s*\.\.\.\s*\]\s*$/.test(content);
+
+                    let type = 'TEXT'; // Default to comment candidate
+                    let isDefiniteDiff = false;
+
+                    if (isHeader) {
+                        isDefiniteDiff = true;
+                        inDiffBlock = true;
+                    } else if (isSkip) {
+                        isDefiniteDiff = true;
+                    } else if (hasQuotes) {
+                        if (isQuoted) {
+                            isDefiniteDiff = true;
+                        } else {
+                            if (!seenDiffOrQuote) isDefiniteDiff = true;
+                            else if (isMeta) isDefiniteDiff = true;
+                        }
+                    } else {
+                        if (!seenDiffOrQuote) isDefiniteDiff = true;
+                        else if (isMeta) isDefiniteDiff = true;
+                        else if (inDiffBlock) {
+                             if (content.startsWith('+') && !content.startsWith('+++')) isDefiniteDiff = true;
+                             else if (content.startsWith('-') && !content.startsWith('---')) isDefiniteDiff = true;
+                             else if (content.startsWith(' ') || content.startsWith('\\') || content.startsWith('\t')) isDefiniteDiff = true;
                         }
                     }
 
-                    let cls = 'diff-line';
-                    if (isDiff) {
-                        if (line.startsWith('+') && !line.startsWith('+++')) cls += ' diff-added';
-                        else if (line.startsWith('-') && !line.startsWith('--')) cls += ' diff-removed';
-                        else if (line.startsWith('@@') || line.startsWith('diff --git') || line.startsWith('--- ') || line.startsWith('+++ ')) cls += ' diff-header';
+                    if (isDefiniteDiff) {
+                        type = 'DIFF';
+                    } else if (line.trim() === '') {
+                        type = 'EMPTY';
                     }
-                    return `<div class="${cls}">${line}</div>`;
-                }).join('');
+
+                    // Store metadata for rendering
+                    let cls = 'diff-line';
+                    if (isHeader) cls += ' diff-header';
+                    else if (isDefiniteDiff) {
+                         if (content.startsWith('+') && !content.startsWith('+++')) cls += ' diff-added';
+                         else if (content.startsWith('-') && !content.startsWith('---')) cls += ' diff-removed';
+                    }
+
+                    return { line, type, cls };
+                });
+
+                // Pass 2: Render with lookahead/buffering
+                let resultHtml = '';
+                let buffer = [];
+                let lastType = 'DIFF'; // Initial state: DIFF (so leading empty lines are not highlighted)
+
+                for (let i = 0; i < classified.length; i++) {
+                    const item = classified[i];
+                    
+                    if (item.type === 'EMPTY') {
+                        buffer.push(item);
+                    } else {
+                        // Flush buffer
+                        if (buffer.length > 0) {
+                            // If bridging TEXT -> TEXT, highlight buffer
+                            const highlightBuffer = (lastType === 'TEXT' && item.type === 'TEXT');
+                            buffer.forEach(b => {
+                                let c = b.cls;
+                                if (highlightBuffer) c += ' ai-comment';
+                                resultHtml += `<div class="${c}">${b.line}</div>`;
+                            });
+                            buffer = [];
+                        }
+                        
+                        // Output current
+                        let c = item.cls;
+                        if (item.type === 'TEXT') c += ' ai-comment';
+                        resultHtml += `<div class="${c}">${item.line}</div>`;
+                        
+                        lastType = item.type;
+                    }
+                }
+                
+                // Flush remaining buffer (trailing empty lines)
+                if (buffer.length > 0) {
+                     buffer.forEach(b => {
+                        resultHtml += `<div class="${b.cls}">${b.line}</div>`;
+                    });
+                }
+                
+                return resultHtml;
             }
             return escaped;
         }
