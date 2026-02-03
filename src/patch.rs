@@ -154,16 +154,23 @@ pub fn parse_email(raw_email: &[u8]) -> Result<(PatchsetMetadata, Option<Patch>)
 
 fn parse_subject_index(subject: &str) -> (u32, u32) {
     static RE: OnceLock<Regex> = OnceLock::new();
-    // Allow [Anything 1/2 Anything]
-    let re = RE.get_or_init(|| Regex::new(r"\[.*?(\d+)/(\d+).*?\]").unwrap());
+    // Allow [Anything 1/2 Anything] OR just 1/2
+    // We prioritize the bracketed version, but allow loose M/N if bounded.
+    let re = RE.get_or_init(|| Regex::new(r"(?:\[.*?(\d+)/(\d+).*?\]|\b(\d+)/(\d+)\b)").unwrap());
 
     if let Some(caps) = re.captures(subject) {
-        let index = caps.get(1).map_or(1, |m| m.as_str().parse().unwrap_or(1));
-        let total = caps.get(2).map_or(1, |m| m.as_str().parse().unwrap_or(1));
-        (index, total)
-    } else {
-        (1, 1)
+        if let (Some(i), Some(t)) = (caps.get(1), caps.get(2)) {
+            let index = i.as_str().parse().unwrap_or(1);
+            let total = t.as_str().parse().unwrap_or(1);
+            return (index, total);
+        }
+        if let (Some(i), Some(t)) = (caps.get(3), caps.get(4)) {
+            let index = i.as_str().parse().unwrap_or(1);
+            let total = t.as_str().parse().unwrap_or(1);
+            return (index, total);
+        }
     }
+    (1, 1)
 }
 
 pub fn parse_subject_version(subject: &str) -> Option<u32> {
@@ -415,5 +422,26 @@ mod tests {
             !meta.is_patch_or_cover,
             "Forwarded Re: should not be a patchset"
         );
+    }
+
+    #[test]
+    fn test_loose_patch_parsing() {
+        // Case 1: Count outside brackets
+        let subject = "[PATCH] 1/2: Subject";
+        let (index, total) = parse_subject_index(subject);
+        assert_eq!(index, 1);
+        assert_eq!(total, 2);
+
+        // Case 2: No brackets
+        let subject = "PATCH 1/2: Subject";
+        let (index, total) = parse_subject_index(subject);
+        assert_eq!(index, 1);
+        assert_eq!(total, 2);
+
+        // Case 3: Leading zeros
+        let subject = "[PATCH 01/02] Subject";
+        let (index, total) = parse_subject_index(subject);
+        assert_eq!(index, 1);
+        assert_eq!(total, 2);
     }
 }
