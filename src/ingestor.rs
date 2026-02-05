@@ -77,7 +77,7 @@ impl Ingestor {
                 } else {
                     // Heuristics for common lists
                     let group = match entry.as_str() {
-                        "linux-mm" => "org.kernel.linux-mm".to_string(),
+                        "linux-mm" => "org.kernel.kvack.linux-mm".to_string(),
                         _ => format!("org.kernel.vger.{}", entry),
                     };
                     (entry.clone(), group)

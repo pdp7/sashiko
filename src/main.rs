@@ -815,7 +815,7 @@ fn identify_subsystems(to: &str, cc: &str) -> Vec<(String, String)> {
                 "linux-fsdevel@vger.kernel.org".to_string(),
             ));
         } else if lower_email.contains("linux-mm@kvack.org") {
-            subsystems.push(("mm".to_string(), "linux-mm@kvack.org".to_string()));
+            subsystems.push(("linux-mm".to_string(), "linux-mm@kvack.org".to_string()));
         } else if lower_email.ends_with("@vger.kernel.org")
             || lower_email.ends_with("@lists.linux.dev")
             || lower_email.ends_with("@lists.infradead.org")
@@ -919,5 +919,10 @@ mod tests {
         assert!(subsystems.contains(&("bpf".to_string(), "bpf@vger.kernel.org".to_string())));
         // random-user should be ignored as it doesn't match list patterns
         assert_eq!(subsystems.len(), 2);
+
+        // Test linux-mm
+        let to = "linux-mm@kvack.org";
+        let subsystems = identify_subsystems(to, "");
+        assert!(subsystems.contains(&("linux-mm".to_string(), "linux-mm@kvack.org".to_string())));
     }
 }
