@@ -229,9 +229,8 @@ impl BaselineRegistry {
         }
 
         // 2. Subsystem Heuristic
-        if let Some(subsystem) = self.resolve_subsystem_heuristic(files, subject) {
-            candidates.push(subsystem);
-        }
+        let heuristic_candidates = self.resolve_subsystem_heuristic(files, subject);
+        candidates.extend(heuristic_candidates);
 
         // 3. Linux Next
         // Hardcoded linux-next URL
@@ -261,8 +260,9 @@ impl BaselineRegistry {
         &self,
         files: &[String],
         subject: &str,
-    ) -> Option<BaselineResolution> {
+    ) -> Vec<BaselineResolution> {
         let mut tree_counts: HashMap<(String, Option<String>), usize> = HashMap::new();
+        let mut matched_subsystem_name = None;
 
         for file in files {
             for entry in &self.entries {
@@ -280,6 +280,11 @@ impl BaselineRegistry {
                 }
 
                 if matched {
+                    // Capture the subsystem name of the first match (simplified heuristic)
+                    if matched_subsystem_name.is_none() {
+                        matched_subsystem_name = Some(entry.subsystem.clone());
+                    }
+
                     for tree in &entry.trees {
                         *tree_counts.entry(tree.clone()).or_insert(0) += 1;
                     }
@@ -288,11 +293,32 @@ impl BaselineRegistry {
         }
 
         if tree_counts.is_empty() {
-            return None;
+            return Vec::new();
         }
 
         let mut candidates: Vec<(&(String, Option<String>), &usize)> = tree_counts.iter().collect();
         candidates.sort_by(|a, b| b.1.cmp(a.1));
+
+        // Check for Linux-MM special handling
+        // If the top candidate is akpm/mm or linux-mm, OR the subsystem is MEMORY MANAGEMENT
+        let (top_url, _top_branch) = candidates[0].0;
+        let is_mm = top_url.contains("akpm/mm")
+            || top_url.contains("linux-mm")
+            || matched_subsystem_name
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("MEMORY MANAGEMENT"))
+                .unwrap_or(false);
+
+        if is_mm {
+            // For linux-mm, we prioritize specific branches: mm-new, mm-unstable, mm-stable
+            // We use the discovered URL (likely akpm/mm)
+            let mm_url = top_url;
+            return vec![
+                self.resolve_url(mm_url, Some("mm-new".to_string())),
+                self.resolve_url(mm_url, Some("mm-unstable".to_string())),
+                self.resolve_url(mm_url, Some("mm-stable".to_string())),
+            ];
+        }
 
         let subject_lower = subject.to_lowercase();
         let keywords = [
@@ -305,7 +331,7 @@ impl BaselineRegistry {
             for kw in keywords {
                 if subject_lower.contains(kw) && url.contains(kw) {
                     if is_next && url.contains("next") {
-                        return Some(self.resolve_url(url, branch.clone()));
+                        return vec![self.resolve_url(url, branch.clone())];
                     }
                     if !is_next && !url.contains("next") {
                         // Prefer non-next if subject doesn't say next?
@@ -313,12 +339,12 @@ impl BaselineRegistry {
                 }
             }
             if is_next && url.contains("next") {
-                return Some(self.resolve_url(url, branch.clone()));
+                return vec![self.resolve_url(url, branch.clone())];
             }
         }
 
         let (url, branch) = candidates[0].0;
-        Some(self.resolve_url(url, branch.clone()))
+        vec![self.resolve_url(url, branch.clone())]
     }
 
     fn resolve_url(&self, url: &str, branch: Option<String>) -> BaselineResolution {
@@ -427,5 +453,59 @@ F: patterns/
         assert_eq!(entries[0].trees.len(), 1);
         assert_eq!(entries[0].trees[0].0, "git://example.com/repo.git");
         assert_eq!(entries[0].trees[0].1, Some("branch".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_linux_mm() {
+        let entries = vec![MaintainersEntry {
+            subsystem: "MEMORY MANAGEMENT".to_string(),
+            trees: vec![(
+                "git://git.kernel.org/pub/scm/linux/kernel/git/akpm/mm.git".to_string(),
+                None,
+            )],
+            patterns: vec!["mm/".to_string()],
+        }];
+        let mut remote_map = HashMap::new();
+        remote_map.insert(
+            "git://git.kernel.org/pub/scm/linux/kernel/git/akpm/mm.git".to_string(),
+            "akpm-mm".to_string(),
+        );
+
+        let registry = BaselineRegistry {
+            entries,
+            remote_map,
+        };
+
+        let files = vec!["mm/memory.c".to_string()];
+        let candidates = registry.resolve_candidates(&files, "Subject", None);
+
+        // Expected order:
+        // 1. mm-new (Subsystem Heuristic 1)
+        // 2. mm-unstable (Subsystem Heuristic 2)
+        // 3. mm-stable (Subsystem Heuristic 3)
+        // 4. linux-next (Hardcoded step 3)
+        // 5. HEAD (Hardcoded step 4)
+
+        assert!(candidates.len() >= 4);
+
+        // Helper to check candidate
+        let check_branch = |c: &BaselineResolution, expected_branch: &str| {
+            if let BaselineResolution::RemoteTarget { branch, .. } = c {
+                assert_eq!(branch.as_deref(), Some(expected_branch));
+            } else {
+                panic!("Expected RemoteTarget with branch {}", expected_branch);
+            }
+        };
+
+        check_branch(&candidates[0], "mm-new");
+        check_branch(&candidates[1], "mm-unstable");
+        check_branch(&candidates[2], "mm-stable");
+
+        // candidates[3] is linux-next (no branch name checked here, usually None -> HEAD, but let's check name)
+        if let BaselineResolution::RemoteTarget { url, .. } = &candidates[3] {
+            assert!(url.contains("linux-next"));
+        } else {
+            panic!("Expected linux-next");
+        }
     }
 }
