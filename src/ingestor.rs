@@ -687,11 +687,18 @@ impl Ingestor {
             if current == 0 && info.high > 0 {
                 // Initialize with a safe overlap window (e.g. 4000 messages ~ 1 day for LKML)
                 // This ensures we catch up if git archive is slightly stale.
-                current = info.high.saturating_sub(4000);
+                let overlap = if self.download.is_some() {
+                    // If we just bootstrapped from git, we are likely close to the tip.
+                    // We only need a small overlap to cover the lag between git mirror and NNTP.
+                    100
+                } else {
+                    4000
+                };
+                current = info.high.saturating_sub(overlap);
                 self.db.update_last_article_num(group_name, current).await?;
                 info!(
-                    "Initialized high-water mark to {} (overlap window)",
-                    current
+                    "Initialized high-water mark to {} (overlap window: {})",
+                    current, overlap
                 );
             }
 

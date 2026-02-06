@@ -248,27 +248,6 @@ async fn main() -> Result<()> {
                     patches_to_review.len()
                 );
 
-                let client = Box::new(sashiko::ai::gemini::StdioGeminiClient);
-
-                // Enable read_prompt tool only if explicit caching is NOT used.
-                let prompts_tool_path = if args.gemini_cache.is_none() {
-                    Some(args.prompts.clone())
-                } else {
-                    None
-                };
-
-                let tools = ToolBox::new(worktree.path.clone(), prompts_tool_path);
-                let prompts = PromptRegistry::new(args.prompts.clone());
-                let mut worker = Worker::new(
-                    client,
-                    tools,
-                    prompts,
-                    settings.ai.max_input_tokens,
-                    settings.ai.max_interactions,
-                    settings.ai.temperature,
-                    args.gemini_cache,
-                );
-
                 let rich_patches: Vec<serde_json::Value> = patches_to_review
                     .iter()
                     .map(|p| {
@@ -308,53 +287,114 @@ async fn main() -> Result<()> {
                     "patches": rich_patches
                 });
 
-                match worker.run(patchset_val).await {
-                    Ok(result) => {
-                        info!("AI review completed (or stopped).");
+                let mut review_result_to_print = None;
 
-                        // Check for review-inline.txt
-                        let inline_path = worktree.path.join("review-inline.txt");
-                        let inline_content = if inline_path.exists() {
-                            match std::fs::read_to_string(&inline_path) {
-                                Ok(content) => Some(content),
-                                Err(e) => {
-                                    error!("Failed to read review-inline.txt: {}", e);
-                                    None
+                for attempt in 1..=3 {
+                    if attempt > 1 {
+                        info!("Restarting AI review (attempt {}/3)...", attempt);
+                    }
+
+                    let client = Box::new(sashiko::ai::gemini::StdioGeminiClient);
+
+                    // Enable read_prompt tool only if explicit caching is NOT used.
+                    let prompts_tool_path = if args.gemini_cache.is_none() {
+                        Some(args.prompts.clone())
+                    } else {
+                        None
+                    };
+
+                    let tools = ToolBox::new(worktree.path.clone(), prompts_tool_path);
+                    let prompts = PromptRegistry::new(args.prompts.clone());
+                    let mut worker = Worker::new(
+                        client,
+                        tools,
+                        prompts,
+                        settings.ai.max_input_tokens,
+                        settings.ai.max_interactions,
+                        settings.ai.temperature,
+                        args.gemini_cache.clone(),
+                    );
+
+                    match worker.run(patchset_val.clone()).await {
+                        Ok(result) => {
+                            info!("AI review completed (or stopped).");
+
+                            // Check for review-inline.txt
+                            let inline_path = worktree.path.join("review-inline.txt");
+                            let inline_content = if inline_path.exists() {
+                                match std::fs::read_to_string(&inline_path) {
+                                    Ok(content) => Some(content),
+                                    Err(e) => {
+                                        error!("Failed to read review-inline.txt: {}", e);
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+
+                            // Check for missing inline review with findings
+                            let mut has_findings = false;
+                            if let Some(output) = &result.output {
+                                if let Some(findings) = output.get("findings").and_then(|f| f.as_array()) {
+                                    if !findings.is_empty() {
+                                        has_findings = true;
+                                    }
                                 }
                             }
-                        } else {
-                            None
-                        };
 
-                        let result_json = json!({
-                            "patchset_id": patchset_id,
-                            "baseline": baseline_arg,
-                            "patches": patch_results,
-                            "review": result.output,
-                            "error": result.error,
-                            "inline_review": inline_content,
-                            "input_context": result.input_context,
-                            "history": result.history,
-                            "tokens_in": result.tokens_in,
-                            "tokens_out": result.tokens_out,
-                            "tokens_cached": result.tokens_cached
-                        });
-                        println!("{}", serde_json::to_string(&result_json)?);
+                            if has_findings && inline_content.is_none() {
+                                error!("Review failure: Findings detected but review-inline.txt was NOT generated.");
+                                if attempt < 3 {
+                                    continue;
+                                }
+                            }
+
+                            review_result_to_print = Some(json!({
+                                "patchset_id": patchset_id,
+                                "baseline": baseline_arg,
+                                "patches": patch_results,
+                                "review": result.output,
+                                "error": result.error,
+                                "inline_review": inline_content,
+                                "input_context": result.input_context,
+                                "history": result.history,
+                                "tokens_in": result.tokens_in,
+                                "tokens_out": result.tokens_out,
+                                "tokens_cached": result.tokens_cached
+                            }));
+                            break;
+                        }
+                        Err(e) => {
+                            error!("AI review failed with exception: {}", e);
+                            if attempt < 3 {
+                                continue;
+                            }
+                            // Even on failure, we print what we have (patches status)
+                            review_result_to_print = Some(json!({
+                                "patchset_id": patchset_id,
+                                "baseline": baseline_arg,
+                                "patches": patch_results,
+                                "error": e.to_string(),
+                                "tokens_in": 0,
+                                "tokens_out": 0,
+                                "tokens_cached": 0
+                            }));
+                            break;
+                        }
                     }
-                    Err(e) => {
-                        error!("AI review failed with exception: {}", e);
-                        // Even on failure, we print what we have (patches status)
-                        let result_json = json!({
-                            "patchset_id": patchset_id,
-                            "baseline": baseline_arg,
-                            "patches": patch_results,
-                            "error": e.to_string(),
-                            "tokens_in": 0,
-                            "tokens_out": 0,
-                            "tokens_cached": 0
-                        });
-                        println!("{}", serde_json::to_string(&result_json)?);
-                    }
+                }
+
+                if let Some(json) = review_result_to_print {
+                    println!("{}", serde_json::to_string(&json)?);
+                } else {
+                    let result_json = json!({
+                        "patchset_id": patchset_id,
+                        "baseline": baseline_arg,
+                        "patches": patch_results,
+                        "error": "Internal error: Review loop finished without result"
+                    });
+                    println!("{}", serde_json::to_string(&result_json)?);
                 }
             }
         } else {

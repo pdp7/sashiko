@@ -5,7 +5,7 @@ url = "sashiko.db"
 token = ""
 
 [mailing_lists]
-track = ["bpf", "linux-mm"]
+track = ["linux-kernel"]
 
 [nntp]
 server = "nntp.lore.kernel.org"
@@ -13,7 +13,7 @@ port = 119
 
 [ai]
 provider = "gemini"
-model = "gemini-3-flash-preview"
+model = "gemini-3-pro-preview"
 max_input_tokens = 200000
 max_interactions = 100
 temperature = 1.0
@@ -21,7 +21,7 @@ explicit_prompts_caching = true
 
 [server]
 host = "127.0.0.1"
-port = 8081
+port = 8080
 
 [git]
 repository_path = "third_party/linux"

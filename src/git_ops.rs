@@ -126,6 +126,7 @@ impl GitWorktree {
             .current_dir(&self.path)
             .args(["-c", "safe.bareRepository=all"])
             .arg("apply")
+            .arg("--3way")
             .arg("-") // Read from stdin
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -359,8 +360,13 @@ pub async fn ensure_remote(
     let should_fetch = if just_added || !head_exists || force_fetch {
         true
     } else {
+        let fetch_interval = if url.contains("akpm/mm") || url.contains("linux-next") {
+            std::time::Duration::from_secs(300)
+        } else {
+            std::time::Duration::from_secs(3600)
+        };
         match age {
-            Some(a) => a > std::time::Duration::from_secs(12 * 3600),
+            Some(a) => a > fetch_interval,
             None => true,
         }
     };

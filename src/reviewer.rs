@@ -463,7 +463,9 @@ impl Reviewer {
         }
 
         let mut retries = 0;
-        let max_retries = ctx.settings.review.max_retries;
+        // Disable retries in this loop to fail fast on patch application or tool errors.
+        // The review binary already handles AI retries internally.
+        let max_retries = 0;
 
         loop {
             let review_id = ctx
