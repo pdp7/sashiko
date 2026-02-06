@@ -48,6 +48,11 @@ struct Args {
     #[arg(long)]
     review_patch_index: Option<i64>,
 
+    /// If set, checks out this specific commit hash and reviews it.
+    /// Skips patch application logic.
+    #[arg(long)]
+    review_commit: Option<String>,
+
     /// Resource name of the Gemini Context Cache to use (e.g. cachedContents/...).
     #[arg(long)]
     gemini_cache: Option<String>,
@@ -129,28 +134,70 @@ async fn main() -> Result<()> {
             let mut patch_shas = std::collections::HashMap::new();
             let mut patch_shows = std::collections::HashMap::new();
 
-            // 1. Apply ALL patches to validate the series
-            info!(
-                "Applying all {} patches to validate series...",
-                patches.len()
-            );
-            let mut all_applied = true;
+            let all_applied;
 
-            for p in &patches {
-                info!("Applying patch part {}", p.index);
-
-                let success = apply_single_patch(
-                    &worktree,
-                    p,
-                    &mut patch_shas,
-                    &mut patch_shows,
-                    &mut patch_results,
-                )
-                .await;
-
-                if !success {
-                    all_applied = false;
+            if let Some(commit_hash) = &args.review_commit {
+                info!("Directly reviewing commit {}", commit_hash);
+                // We assume the caller has already validated the series and applied it.
+                // We just checkout the specific commit.
+                // Note: The commit must exist in the repo (shared object store).
+                
+                // Fetch/Checkout logic for worktree
+                // GitWorktree::new checks out 'baseline' initially.
+                // We need to fetch/reset to the specific commit.
+                // Since it's a shared repo, we can just reset --hard to the hash.
+                if let Err(e) = worktree.reset_hard(commit_hash).await {
+                     error!("Failed to checkout target commit {}: {}", commit_hash, e);
+                     let result_json = json!({
+                        "patchset_id": patchset_id,
+                        "baseline": baseline_arg,
+                        "patches": patch_results,
+                        "error": format!("Failed to checkout target commit: {}", e)
+                    });
+                    println!("{}", serde_json::to_string(&result_json)?);
+                    return Ok(());
                 }
+
+                all_applied = true;
+
+                // Populate metadata for the single patch we are reviewing
+                if let Some(idx) = args.review_patch_index {
+                     patch_shas.insert(idx, commit_hash.clone());
+                     if let Ok(show) = worktree.get_commit_show(commit_hash).await {
+                        patch_shows.insert(idx, show);
+                    }
+                    // Fake a success result for this patch so the report looks good
+                    patch_results.push(json!({
+                        "index": idx,
+                        "status": "applied",
+                        "method": "pre-applied"
+                    }));
+                }
+            } else {
+                // 1. Apply ALL patches to validate the series
+                info!(
+                    "Applying all {} patches to validate series...",
+                    patches.len()
+                );
+                let mut applied_flag = true;
+
+                for p in &patches {
+                    info!("Applying patch part {}", p.index);
+
+                    let success = apply_single_patch(
+                        &worktree,
+                        p,
+                        &mut patch_shas,
+                        &mut patch_shows,
+                        &mut patch_results,
+                    )
+                    .await;
+
+                    if !success {
+                        applied_flag = false;
+                    }
+                }
+                all_applied = applied_flag;
             }
 
             // Determine patches to review
@@ -171,7 +218,10 @@ async fn main() -> Result<()> {
 
             if all_applied {
                 // 2. Prepare worktree context if reviewing a specific patch
-                if let Some(target_idx) = args.review_patch_index {
+                // Only needed if we didn't use review_commit (which already sets context)
+                if args.review_commit.is_none() {
+                    if let Some(target_idx) = args.review_patch_index {
+
                     // Optimization: Only reset if target_idx < max_index
                     let max_index = patches.iter().map(|p| p.index).max().unwrap_or(0);
 
@@ -226,6 +276,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                }
                 }
 
                 if patches_to_review.is_empty() {

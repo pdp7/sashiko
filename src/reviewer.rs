@@ -20,10 +20,11 @@ use crate::ai::gemini::{
 use crate::ai::proxy::QuotaManager;
 use crate::baseline::{BaselineRegistry, BaselineResolution, extract_files_from_diff};
 use crate::db::{AiInteractionParams, Database, Finding, PatchsetRow, Severity, ToolUsage};
-use crate::git_ops::{ensure_remote, get_commit_hash};
+use crate::git_ops::{ensure_remote, get_commit_hash, GitWorktree};
 use crate::settings::Settings;
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -370,39 +371,188 @@ impl Reviewer {
             }
         }
 
-        let mut candidate_success = true;
-        let mut application_failed = false;
+        // 1. Validate Series by applying all patches to a temporary worktree
+        info!("Validating series application on baseline: {}", baseline_ref);
+        let baseline_sha = match get_commit_hash(&repo_path, &baseline_ref).await {
+            Ok(sha) => sha,
+            Err(e) => {
+                error!("Failed to resolve baseline {}: {}", baseline_ref, e);
+                return (false, false);
+            }
+        };
 
-        for (patch_id, index, _diff, _subj, _auth, _date, _msg_id) in diffs {
-            let result = Self::process_patch_in_candidate(
-                ctx,
-                patchset_id,
-                *patch_id,
-                *index,
-                &baseline_ref,
-                candidate,
-                input_payload,
-            )
-            .await;
+        let worktree = match GitWorktree::new(&repo_path, &baseline_sha, None).await {
+            Ok(wt) => wt,
+            Err(e) => {
+                error!("Failed to create worktree: {}", e);
+                return (false, false);
+            }
+        };
 
-            match result {
-                Ok(PatchResult::Success) => {
-                    // Continue to next patch
-                }
-                Ok(PatchResult::ApplyFailed) => {
-                    candidate_success = false;
-                    application_failed = true;
-                    break;
-                }
-                Ok(PatchResult::ReviewFailed) => {
-                    candidate_success = false;
-                    break;
-                }
-                Err(_) => {
-                    candidate_success = false;
-                    break;
+        // Wrap logic to ensure cleanup
+        let (candidate_success, application_failed) = async {
+            let mut patch_commits = HashMap::new();
+            let mut application_failed = false;
+
+            for (patch_id, index, diff, subject, author, date_ts, _msg_id) in diffs {
+                 // Construct mbox
+                 let date_str = std::process::Command::new("date")
+                    .arg("-R")
+                    .arg("-d")
+                    .arg(format!("@{}", date_ts))
+                    .output()
+                    .ok()
+                    .and_then(|o| {
+                        if o.status.success() {
+                            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
+                let mbox = format!(
+                    "From: {}\nDate: {}\nSubject: {}\n\n{}\n",
+                    author, date_str, subject, diff
+                );
+
+                // Try git am first
+                let applied = match worktree.apply_patch(&mbox).await {
+                    Ok(_) => true,
+                    Err(_) => {
+                         // Fallback to raw diff
+                         match worktree.apply_raw_diff(diff).await {
+                            Ok(o) => o.status.success(),
+                            Err(_) => false,
+                         }
+                    }
+                };
+
+                if applied {
+                    let head_sha = if let Ok(sha) = get_commit_hash(&worktree.path, "HEAD").await {
+                        sha
+                    } else {
+                        "unknown".to_string()
+                    };
+                    patch_commits.insert(*index, head_sha);
+                } else {
+                     error!("Patch {}/{} (ID: {}) failed to apply.", patchset_id, index, patch_id);
+                     application_failed = true;
+                     break;
                 }
             }
+            
+            // Re-implementing the loop properly to handle commit creation
+            patch_commits.clear();
+            if application_failed || worktree.reset_hard(&baseline_sha).await.is_err() {
+                 return (false, true);
+            }
+
+            for (patch_id, index, diff, subject, author, date_ts, _msg_id) in diffs {
+                 let date_str = std::process::Command::new("date")
+                    .arg("-R")
+                    .arg("-d")
+                    .arg(format!("@{}", date_ts))
+                    .output()
+                    .ok()
+                    .and_then(|o| {
+                        if o.status.success() {
+                            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
+                let mbox = format!(
+                    "From: {}\nDate: {}\nSubject: {}\n\n{}\n",
+                    author, date_str, subject, diff
+                );
+
+                if let Ok(_) = worktree.apply_patch(&mbox).await {
+                     if let Ok(sha) = get_commit_hash(&worktree.path, "HEAD").await {
+                         patch_commits.insert(*index, sha);
+                         continue;
+                     }
+                }
+
+                // Fallback: apply raw diff and commit
+                match worktree.apply_raw_diff(diff).await {
+                    Ok(out) if out.status.success() => {
+                         let _ = Command::new("git")
+                            .current_dir(&worktree.path)
+                            .args(["add", "."])
+                            .output()
+                            .await;
+                         
+                         let commit_msg = format!("{}\n\n(Applied via git apply)", subject);
+                         let commit = Command::new("git")
+                            .current_dir(&worktree.path)
+                            .env("GIT_AUTHOR_NAME", author)
+                            .env("GIT_AUTHOR_EMAIL", "sashiko@localhost") // simplified
+                            .args(["commit", "-m", &commit_msg])
+                            .output()
+                            .await;
+                        
+                        if commit.is_ok() && commit.unwrap().status.success() {
+                            if let Ok(sha) = get_commit_hash(&worktree.path, "HEAD").await {
+                                 patch_commits.insert(*index, sha);
+                                 continue;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                error!("Patch {}/{} (ID: {}) failed to apply during series validation.", patchset_id, index, patch_id);
+                return (false, true);
+            }
+
+            info!("Series validation successful for baseline {}. Commits generated: {:?}", baseline_ref, patch_commits.len());
+
+            let mut candidate_success = true;
+
+            for (patch_id, index, _diff, _subj, _auth, _date, _msg_id) in diffs {
+                // Retrieve the commit SHA we just created/verified
+                let commit_sha = patch_commits.get(index).cloned();
+
+                let result = Self::process_patch_in_candidate(
+                    ctx,
+                    patchset_id,
+                    *patch_id,
+                    *index,
+                    &baseline_ref,
+                    candidate,
+                    input_payload,
+                    commit_sha, // Pass the commit SHA
+                )
+                .await;
+
+                match result {
+                    Ok(PatchResult::Success) => {
+                        // Continue to next patch
+                    }
+                    Ok(PatchResult::ApplyFailed) => {
+                        candidate_success = false;
+                        application_failed = true;
+                        break;
+                    }
+                    Ok(PatchResult::ReviewFailed) => {
+                        candidate_success = false;
+                        break;
+                    }
+                    Err(_) => {
+                        candidate_success = false;
+                        break;
+                    }
+                }
+            }
+
+            (candidate_success, application_failed)
+        }.await;
+
+        if let Err(e) = worktree.remove().await {
+            error!("Failed to remove worktree: {}", e);
         }
 
         (candidate_success, application_failed)
@@ -416,6 +566,7 @@ impl Reviewer {
         baseline_ref: &str,
         candidate: &BaselineResolution,
         input_payload: &Value,
+        commit_sha: Option<String>,
     ) -> Result<PatchResult> {
         info!(
             "Reviewing patch {}/{} (ID: {})",
@@ -491,6 +642,7 @@ impl Reviewer {
                 ctx.db.clone(),
                 baseline_ref,
                 Some(index),
+                commit_sha.clone(),
                 ctx.quota_manager.clone(),
                 ctx.current_cache_name.as_deref(),
                 ctx.cache_manager.clone(),
@@ -820,6 +972,7 @@ async fn run_review_tool(
     db: Arc<Database>,
     baseline: &str,
     review_index: Option<i64>,
+    review_commit: Option<String>,
     quota_manager: Arc<QuotaManager>,
     cache_name: Option<&str>,
     cache_manager: Arc<CacheManager>,
@@ -857,6 +1010,10 @@ async fn run_review_tool(
 
     if let Some(idx) = review_index {
         cmd.arg("--review-patch-index").arg(idx.to_string());
+    }
+
+    if let Some(commit) = review_commit {
+        cmd.arg("--review-commit").arg(commit);
     }
 
     if let Some(name) = cache_name {
