@@ -700,6 +700,10 @@
             if (msgMatch) {
                 return { view: 'message', id: decodeURIComponent(msgMatch[1]), query };
             }
+            const baselineLogMatch = hash.match(/^#\/log\/baseline\/(.+)\/(\d+)$/);
+            if (baselineLogMatch) {
+                return { view: 'baseline_log', id: baselineLogMatch[1], idx: parseInt(baselineLogMatch[2]), query };
+            }
             const logMatch = hash.match(/^#\/log\/(\d+)$/);
             if (logMatch) {
                 return { view: 'log', id: logMatch[1], query };
@@ -753,6 +757,9 @@
                         break;
                     case 'log':
                         await renderLogView(route.id);
+                        break;
+                    case 'baseline_log':
+                        await renderBaselineLogView(route.id, route.idx);
                         break;
                     case 'stats':
                         await renderStatsView();
@@ -1495,12 +1502,7 @@
                                     <td style="padding:6px; border-bottom:1px solid #eee;">${escapeHtml(item.baseline)}</td>
                                     <td style="padding:6px; border-bottom:1px solid #eee;">${statusBadge}</td>
                                     <td style="padding:6px; border-bottom:1px solid #eee; text-align:right;">
-                                        <button class="toggle-btn" onclick="toggleCollapsible('${rowId}', this)" style="font-size:0.85em;">▶ Details</button>
-                                    </td>
-                                </tr>
-                                <tr id="${rowId}" class="collapsible" style="background:#fcfcfc;">
-                                    <td colspan="3" style="padding:0;">
-                                        <div class="log-block" style="border:none; border-bottom:1px solid #eee; margin:0; max-height:300px;">${escapeHtml(item.log || '')}</div>
+                                        <a href="#/log/baseline/${encodeURIComponent(data.id || data.message_id)}/${idx}" class="copy-btn" style="text-decoration:none; padding:3px 8px; font-weight:normal; font-size:0.85em;">View Log</a>
                                     </td>
                                 </tr>
                              `;
@@ -1565,6 +1567,44 @@
                     <h2 id="ai-reviews">AI Reviews</h2>
                     ${summaryHtml}
                     ${reviewsHtml}
+                </div>
+            `;
+        }
+
+        // =====================================================================
+        // BASELINE LOG VIEW
+        // =====================================================================
+        async function renderBaselineLogView(id, idx) {
+            const res = await fetch(`/api/patch?id=${encodeURIComponent(id)}`);
+            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            const data = await res.json();
+
+            let logContent = 'Log not found';
+            let baselineName = '-';
+            let status = '-';
+
+            try {
+                const logs = JSON.parse(data.baseline_logs);
+                if (Array.isArray(logs) && logs[idx]) {
+                    logContent = logs[idx].log || '(empty log)';
+                    baselineName = logs[idx].baseline || '-';
+                    status = logs[idx].status || '-';
+                }
+            } catch (e) {
+                logContent = 'Failed to parse baseline logs';
+            }
+
+            document.getElementById('app').innerHTML = `
+                <div class="nav"><a href="#/" onclick="event.preventDefault(); goBack();">← Back</a></div>
+                <h1>
+                    <span>Baseline Application Log</span>
+                    <span style="font-size:0.7em; font-weight:normal; color:#888;">
+                        ${escapeHtml(baselineName)} · 
+                        <span class="status-badge status-${status}">${status}</span>
+                    </span>
+                </h1>
+                <div class="section">
+                    <div class="log-block" style="max-height: none;">${escapeHtml(logContent)}</div>
                 </div>
             `;
         }
