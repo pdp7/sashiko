@@ -24,7 +24,7 @@ The validation process will be implemented in `src/bin/benchmark_review.rs`.
     - **Strictness**: The comparison must check if *one* of the findings *exactly* describes the problem.
     - **Prompt Strategy**:
         - Provide the "Ground Truth" problem.
-        - Provide the list of "Tool Findings".
+        - Provide the list of "Tool Findings" (including problem description, severity, and explanation).
         - Ask specifically: "Does any finding exactly describe the ground truth problem?"
         - Classify as `DETECTED` (exact match), `PARTIALLY_DETECTED` (vague or slightly off), or `MISSED`.
 5.  **Reporting**:
