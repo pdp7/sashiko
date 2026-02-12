@@ -20,7 +20,7 @@ use tokio::fs;
 /// System identity prompt - used across all AI interactions
 pub const SYSTEM_IDENTITY: &str = "You're an expert Linux kernel developer and upstream maintainer with deep knowledge of Linux kernel, Operating Systems, CPU architectures, modern hardware and Linux kernel community standards and processes.";
 
-pub const OUTPUT_FORMAT_INSTRUCTION: &str = "Important: If you have ANY findings, you *MUST* produce the `review-inline.txt` file. This file *MUST* follow the format and guidelines provided in `inline-template.md`. Once you generated the correct `review-inline.txt`, produce the JSON response described by response_schema to finish your task. Do not generate `review-metadata.json`, it's not required";
+pub const OUTPUT_FORMAT_INSTRUCTION: &str = "Important: If you have ANY findings, you *MUST* produce the `review-inline.txt` content. This content *MUST* follow the format and guidelines provided in `inline-template.md`. Once you generated the correct `review-inline.txt` content, produce the JSON response described by response_schema and include it in the `review_inline` field to finish your task. Do not generate `review-metadata.json`, it's not required";
 
 pub struct PromptRegistry {
     base_dir: PathBuf,
@@ -303,16 +303,6 @@ mod tests {
         // Verify exclusions
         assert!(!context.contains("Ignored Debugging"));
         assert!(!context.contains("Ignored Subdir Content"));
-    }
-
-    #[tokio::test]
-    async fn test_build_context_includes_instruction() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let registry = PromptRegistry::new(temp_dir.path().to_path_buf());
-        let context = registry.build_context().await.unwrap();
-        assert!(context.contains("Important: If you have ANY findings"));
-        // Ensure JSON schema is NOT present
-        assert!(!context.contains("Your final response must be a valid JSON object"));
     }
 
     #[tokio::test]

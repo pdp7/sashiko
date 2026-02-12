@@ -379,19 +379,18 @@ async fn main() -> Result<()> {
                             Ok(result) => {
                                 info!("AI review completed (or stopped).");
 
-                                // Check for review-inline.txt
-                                let inline_path = worktree.path.join("review-inline.txt");
-                                let inline_content = if inline_path.exists() {
-                                    match std::fs::read_to_string(&inline_path) {
-                                        Ok(content) => Some(content),
-                                        Err(e) => {
-                                            error!("Failed to read review-inline.txt: {}", e);
-                                            None
+                                // Extract review_inline from JSON and write to disk
+                                let mut inline_content = None;
+                                if let Some(output) = &result.output {
+                                    if let Some(content) = output.get("review_inline").and_then(|v| v.as_str()) {
+                                        let inline_path = worktree.path.join("review-inline.txt");
+                                        if let Err(e) = std::fs::write(&inline_path, content) {
+                                            error!("Failed to write review-inline.txt: {}", e);
+                                        } else {
+                                            inline_content = Some(content.to_string());
                                         }
                                     }
-                                } else {
-                                    None
-                                };
+                                }
 
                                 // Check for missing inline review with findings
                                 let mut has_findings = false;
@@ -404,7 +403,7 @@ async fn main() -> Result<()> {
                                 }
 
                                 if has_findings && inline_content.is_none() {
-                                    error!("Review failure: Findings detected but review-inline.txt was NOT generated.");
+                                    error!("Review failure: Findings detected but review_inline field was missing or empty.");
                                     if attempt < 3 {
                                         continue;
                                     }

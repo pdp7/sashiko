@@ -247,6 +247,10 @@ impl Worker {
                         "description": "Step-by-step analysis trace."
                     },
                     "summary": { "type": "string", "description": "High-level summary of the original change being reviewed." },
+                    "review_inline": {
+                        "type": "string",
+                        "description": "The full content of the inline review (formatted according to inline-template.md). This MUST be populated if there are any findings."
+                    },
                     "findings": {
                         "type": "array",
                         "items": {
@@ -398,22 +402,7 @@ impl Worker {
                             .count();
 
                         if same_call_count > 0 {
-                            // Strict check for write_file: No duplicates allowed.
-                            if call.name == "write_file" {
-                                let error_msg = "Duplicate Action: You have already executed this write_file command with identical arguments in this session. Proceed to the next step.";
-                                debug!("Blocking duplicate write_file call");
-
-                                function_responses.push(Part::FunctionResponse {
-                                    function_response: FunctionResponse {
-                                        name: call.name.clone(),
-                                        response: json!({ "error": error_msg }),
-                                    },
-                                });
-                                session_tool_history.push((call.name.clone(), call.args.clone()));
-                                continue;
-                            }
-
-                            // For other tools, allow some repetition but prevent infinite loops (e.g. > 5 times)
+                            // For tools, allow some repetition but prevent infinite loops (e.g. > 5 times)
                             if same_call_count >= 5 {
                                 let error_msg = format!(
                                     "Loop detected: Tool '{}' called with same arguments {} times. Terminating.",

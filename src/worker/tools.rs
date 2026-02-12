@@ -118,19 +118,6 @@ impl ToolBox {
                 }),
             },
             FunctionDeclaration {
-                name: "write_file".to_string(),
-                description: "Write content to a file in the worktree. Only 'review-metadata.json' and 'review-inline.txt' are allowed. Overwrites existing files."
-                    .to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Relative path to the file (e.g., 'review-inline.txt')." },
-                        "content": { "type": "string", "description": "Content to write." }
-                    },
-                    "required": ["path", "content"]
-                }),
-            },
-            FunctionDeclaration {
                 name: "search_file_content".to_string(),
                 description: "Search for a pattern in files using grep. Returns matching lines with context.".to_string(),
                 parameters: json!({
@@ -191,7 +178,6 @@ impl ToolBox {
         let name_normalized = name.trim().to_lowercase();
         match name_normalized.as_str() {
             "read_files" => self.read_files(args).await,
-            "write_file" => self.write_file(args).await,
             "git_blame" => self.git_blame(args).await,
             "git_diff" => self.git_diff(args).await,
             "git_show" => self.git_show(args).await,
@@ -315,47 +301,6 @@ impl ToolBox {
             "start_line": start + 1,
             "end_line": end
         }))
-    }
-
-    async fn write_file(&self, args: Value) -> Result<Value> {
-        let path_str = args["path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Missing path"))?;
-
-        if path_str != "review-metadata.json" && path_str != "review-inline.txt" {
-            return Err(anyhow!(
-                "Permission denied: Only 'review-metadata.json' and 'review-inline.txt' can be written."
-            ));
-        }
-
-        let content = args["content"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Missing content"))?;
-
-        if path_str == "review-inline.txt" {
-            let lines: Vec<&str> = content.lines().collect();
-            if lines.is_empty() {
-                return Err(anyhow!(
-                    "Invalid format for review-inline.txt: File is empty. Please check `inline-template.md` for the correct output format."
-                ));
-            }
-            if !lines[0].starts_with("commit ") {
-                return Err(anyhow!(
-                    "Invalid format for review-inline.txt: First line must start with 'commit <SHA>'. Found: '{}'. Please check `inline-template.md` for the correct output format.",
-                    lines[0]
-                ));
-            }
-            if lines.len() < 2 || !lines[1].starts_with("Author: ") {
-                return Err(anyhow!(
-                    "Invalid format for review-inline.txt: Second line must start with 'Author: <name>'. Please check `inline-template.md` for the correct output format."
-                ));
-            }
-        }
-
-        let path = self.validate_path(path_str, &self.worktree_path)?;
-        fs::write(path, content).await?;
-
-        Ok(json!({ "status": "success" }))
     }
 
     async fn git_blame(&self, args: Value) -> Result<Value> {
