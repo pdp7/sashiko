@@ -219,3 +219,227 @@ impl ClaudeClient {
         }
     }
 }
+
+// --- Translation Functions ---
+
+fn translate_ai_request(request: &AiRequest, enable_caching: bool) -> Result<ClaudeRequest> {
+    let mut messages = Vec::new();
+    let mut system_blocks = Vec::new();
+
+    // Extract system prompt from the explicit system field
+    if let Some(system_text) = &request.system {
+        system_blocks.push(SystemBlock {
+            block_type: "text".to_string(),
+            text: system_text.clone(),
+            cache_control: None, // Will be set later if caching is enabled
+        });
+    }
+
+    // Translate messages
+    for msg in &request.messages {
+        match msg.role {
+            AiRole::System => {
+                // System messages in messages array (for backward compatibility)
+                // Add to system blocks
+                if let Some(content) = &msg.content {
+                    system_blocks.push(SystemBlock {
+                        block_type: "text".to_string(),
+                        text: content.clone(),
+                        cache_control: None,
+                    });
+                }
+            }
+            AiRole::User => {
+                let content = vec![ClaudeContent::Text {
+                    text: msg.content.clone().unwrap_or_default(),
+                    cache_control: None,
+                }];
+                messages.push(ClaudeMessage {
+                    role: "user".to_string(),
+                    content,
+                });
+            }
+            AiRole::Assistant => {
+                let mut content = Vec::new();
+
+                // Add text content if present
+                if let Some(text) = &msg.content {
+                    content.push(ClaudeContent::Text {
+                        text: text.clone(),
+                        cache_control: None,
+                    });
+                }
+
+                // Add tool calls as tool_use blocks
+                if let Some(tool_calls) = &msg.tool_calls {
+                    for call in tool_calls {
+                        content.push(ClaudeContent::ToolUse {
+                            id: call.id.clone(),
+                            name: call.function_name.clone(),
+                            input: call.arguments.clone(),
+                        });
+                    }
+                }
+
+                messages.push(ClaudeMessage {
+                    role: "assistant".to_string(),
+                    content,
+                });
+            }
+            AiRole::Tool => {
+                // Tool results become user messages with tool_result content blocks
+                let tool_call_id = msg
+                    .tool_call_id
+                    .as_ref()
+                    .context("Tool message missing tool_call_id")?;
+
+                let content = vec![ClaudeContent::ToolResult {
+                    tool_use_id: tool_call_id.clone(),
+                    content: msg.content.clone().unwrap_or_else(|| "{}".to_string()),
+                    is_error: None,
+                }];
+
+                messages.push(ClaudeMessage {
+                    role: "user".to_string(),
+                    content,
+                });
+            }
+        }
+    }
+
+    // Translate tools
+    let tools = request.tools.as_ref().map(|t| {
+        t.iter()
+            .map(|tool| ClaudeTool {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: tool.parameters.clone(),
+                cache_control: None, // Will be set later if caching is enabled
+            })
+            .collect()
+    });
+
+    // Build the request
+    let mut claude_request = ClaudeRequest {
+        model: String::new(), // Will be set by the client
+        messages,
+        max_tokens: 4096, // Hard-coded as per plan
+        system: if system_blocks.is_empty() {
+            None
+        } else {
+            Some(system_blocks)
+        },
+        tools,
+        temperature: request.temperature,
+    };
+
+    // Apply cache control if enabled
+    if enable_caching {
+        apply_cache_control(&mut claude_request);
+    }
+
+    Ok(claude_request)
+}
+
+fn apply_cache_control(request: &mut ClaudeRequest) {
+    // Mark last system block for caching
+    if let Some(system) = &mut request.system {
+        if let Some(last_block) = system.last_mut() {
+            last_block.cache_control = Some(CacheControl {
+                cache_type: "ephemeral".to_string(),
+            });
+        }
+    }
+
+    // Mark last tool for caching (if tools exist)
+    if let Some(tools) = &mut request.tools {
+        if let Some(last_tool) = tools.last_mut() {
+            last_tool.cache_control = Some(CacheControl {
+                cache_type: "ephemeral".to_string(),
+            });
+        }
+    }
+}
+
+fn translate_ai_response(resp: &ClaudeResponse) -> Result<AiResponse> {
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+
+    for block in &resp.content {
+        match block {
+            ClaudeContent::Text { text, .. } => {
+                content.push_str(text);
+            }
+            ClaudeContent::ToolUse { id, name, input } => {
+                tool_calls.push(ToolCall {
+                    id: id.clone(),
+                    function_name: name.clone(),
+                    arguments: input.clone(),
+                    thought_signature: None, // Claude doesn't expose thought signatures
+                });
+            }
+            ClaudeContent::ToolResult { .. } => {
+                // Tool results shouldn't appear in responses, but skip if they do
+            }
+        }
+    }
+
+    let usage = AiUsage {
+        prompt_tokens: resp.usage.input_tokens as usize,
+        completion_tokens: resp.usage.output_tokens as usize,
+        total_tokens: (resp.usage.input_tokens + resp.usage.output_tokens) as usize,
+        cached_tokens: resp
+            .usage
+            .cache_read_input_tokens
+            .map(|c| c as usize),
+    };
+
+    Ok(AiResponse {
+        content: if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        },
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
+        usage: Some(usage),
+    })
+}
+
+fn estimate_tokens_generic(request: &AiRequest) -> usize {
+    use crate::ai::token_budget::TokenBudget;
+
+    let mut total = 0;
+
+    // Count system prompt tokens
+    if let Some(system) = &request.system {
+        total += TokenBudget::estimate_tokens(system);
+    }
+
+    // Count message tokens
+    for msg in &request.messages {
+        if let Some(content) = &msg.content {
+            total += TokenBudget::estimate_tokens(content);
+        }
+        if let Some(tool_calls) = &msg.tool_calls {
+            for call in tool_calls {
+                total += TokenBudget::estimate_tokens(&call.function_name);
+                total += TokenBudget::estimate_tokens(&call.arguments.to_string());
+            }
+        }
+    }
+
+    // Count tool definition tokens
+    if let Some(tools) = &request.tools {
+        for tool in tools {
+            total += TokenBudget::estimate_tokens(&tool.name);
+            total += TokenBudget::estimate_tokens(&tool.description);
+            total += TokenBudget::estimate_tokens(&tool.parameters.to_string());
+        }
+    }
+
+    total
+}
