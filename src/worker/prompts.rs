@@ -99,14 +99,28 @@ impl PromptRegistry {
 
     /// Returns the initial user message to start the task.
     /// - `use_cache`: If true, assumes `build_context` is already in the cache.
-    pub async fn get_user_task_prompt(&self, use_cache: bool) -> Result<String> {
+    /// - `series_range`: Optional git range of the series (e.g. "base..head") to check for fixes.
+    pub async fn get_user_task_prompt(
+        &self,
+        use_cache: bool,
+        series_range: Option<String>,
+    ) -> Result<String> {
         let trigger = if use_cache {
             "Refer to the `# review-core.md` section in the pre-loaded context and run a deep dive regression analysis as described in the protocol of the top commit in the Linux source tree. Do NOT attempt to load any additional prompts."
         } else {
             "Load the protocol from `review-core.md` and run a deep dive regression analysis as described in the protocol of the top commit in the Linux source tree. You also must load the `inline-template.md` and `severity.md` prompts."
         };
 
-        Ok(format!("{}\n\n{}", trigger, OUTPUT_FORMAT_INSTRUCTION))
+        let mut prompt = format!("{}\n\n{}", trigger, OUTPUT_FORMAT_INSTRUCTION);
+
+        if let Some(range) = series_range {
+            prompt.push_str(&format!(
+                "\n\nCheck every finding on being present at the end of the series. If the bug was fixed within the series (range: {}), it should not be reported in the final report.",
+                range
+            ));
+        }
+
+        Ok(prompt)
     }
 
     async fn append_file(&self, buffer: &mut String, filename: &str) -> Result<()> {
@@ -264,7 +278,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let registry = PromptRegistry::new(temp_dir.path().to_path_buf());
 
-        let prompt = registry.get_user_task_prompt(true).await.unwrap();
+        let prompt = registry.get_user_task_prompt(true, None).await.unwrap();
 
         // In cached mode, the prompt is minimal and relies on pre-loaded context.
         assert!(!prompt.contains(SYSTEM_IDENTITY));
@@ -278,12 +292,27 @@ mod tests {
         std::fs::write(temp_dir.path().join("review-core.md"), "Protocol content").unwrap();
 
         let registry = PromptRegistry::new(temp_dir.path().to_path_buf());
-        let prompt = registry.get_user_task_prompt(false).await.unwrap();
+        let prompt = registry.get_user_task_prompt(false, None).await.unwrap();
 
         assert!(!prompt.contains(SYSTEM_IDENTITY));
         assert!(prompt.contains("Load the protocol from `review-core.md`"));
         assert!(!prompt.contains("Refer to the protocol in the pre-loaded context"));
         assert!(prompt.contains("Important: `review_inline` field"));
+    }
+
+    #[tokio::test]
+    async fn test_user_task_prompt_with_series_range() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let registry = PromptRegistry::new(temp_dir.path().to_path_buf());
+
+        let range = "base..head";
+        let prompt = registry
+            .get_user_task_prompt(true, Some(range.to_string()))
+            .await
+            .unwrap();
+
+        assert!(prompt.contains(range));
+        assert!(prompt.contains("Check every finding on being present at the end of the series"));
     }
 
     #[tokio::test]

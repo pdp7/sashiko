@@ -38,6 +38,7 @@ pub struct Worker {
     temperature: f32,
     cache_name: Option<String>,
     custom_prompt: Option<String>,
+    series_range: Option<String>,
 }
 
 pub struct WorkerResult {
@@ -72,6 +73,7 @@ pub struct WorkerConfig {
     pub temperature: f32,
     pub cache_name: Option<String>,
     pub custom_prompt: Option<String>,
+    pub series_range: Option<String>,
 }
 
 impl Worker {
@@ -91,6 +93,7 @@ impl Worker {
             temperature: config.temperature,
             cache_name: config.cache_name,
             custom_prompt: config.custom_prompt,
+            series_range: config.series_range,
         }
     }
 
@@ -151,7 +154,7 @@ impl Worker {
         let system_prompt = PromptRegistry::get_system_identity().to_string();
         let initial_user_message = self
             .prompts
-            .get_user_task_prompt(self.cache_name.is_some())
+            .get_user_task_prompt(self.cache_name.is_some(), self.series_range.clone())
             .await?;
 
         // Extract and append patch content

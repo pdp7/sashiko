@@ -128,13 +128,19 @@ mod tests {
 
         let tools = ToolBox::new(linux_path, None);
         let prompts = PromptRegistry::new(prompts_path);
-        let mut worker = Worker::new(client, tools, prompts, WorkerConfig {
-            max_input_tokens: 150_000,
-            max_interactions: 25,
-            temperature: 1.0,
-            cache_name: None,
-            custom_prompt: None,
-        });
+        let mut worker = Worker::new(
+            client,
+            tools,
+            prompts,
+            WorkerConfig {
+                max_input_tokens: 150_000,
+                max_interactions: 25,
+                temperature: 1.0,
+                cache_name: None,
+                custom_prompt: None,
+                series_range: None,
+            },
+        );
 
         let patchset = json!({
             "subject": "Test Patch",
@@ -164,13 +170,19 @@ mod tests {
 
         let tools = ToolBox::new(linux_path, None);
         let prompts = PromptRegistry::new(prompts_path);
-        let mut worker = Worker::new(client, tools, prompts, WorkerConfig {
-            max_input_tokens: 150_000,
-            max_interactions: 25,
-            temperature: 1.0,
-            cache_name: None,
-            custom_prompt: None,
-        });
+        let mut worker = Worker::new(
+            client,
+            tools,
+            prompts,
+            WorkerConfig {
+                max_input_tokens: 150_000,
+                max_interactions: 25,
+                temperature: 1.0,
+                cache_name: None,
+                custom_prompt: None,
+                series_range: None,
+            },
+        );
 
         let patchset = json!({
             "subject": "Docs update",
@@ -233,13 +245,19 @@ mod tests {
 
         let tools = ToolBox::new(linux_path, None);
         let prompts = PromptRegistry::new(prompts_path);
-        let mut worker = Worker::new(client, tools, prompts, WorkerConfig {
-            max_input_tokens: 150_000,
-            max_interactions: 25,
-            temperature: 1.0,
-            cache_name: None,
-            custom_prompt: None,
-        });
+        let mut worker = Worker::new(
+            client,
+            tools,
+            prompts,
+            WorkerConfig {
+                max_input_tokens: 150_000,
+                max_interactions: 25,
+                temperature: 1.0,
+                cache_name: None,
+                custom_prompt: None,
+                series_range: None,
+            },
+        );
 
         let patchset = json!({
             "subject": "Loop Test",
@@ -280,13 +298,19 @@ mod tests {
 
         let tools = ToolBox::new(linux_path, None);
         let prompts = PromptRegistry::new(prompts_path);
-        let mut worker = Worker::new(client, tools, prompts, WorkerConfig {
-            max_input_tokens: 150_000,
-            max_interactions: 25,
-            temperature: 1.0,
-            cache_name: None,
-            custom_prompt: None,
-        });
+        let mut worker = Worker::new(
+            client,
+            tools,
+            prompts,
+            WorkerConfig {
+                max_input_tokens: 150_000,
+                max_interactions: 25,
+                temperature: 1.0,
+                cache_name: None,
+                custom_prompt: None,
+                series_range: None,
+            },
+        );
 
         let patchset = json!({
             "subject": "Extraction Test",
@@ -327,6 +351,7 @@ mod tests {
                 temperature: 1.0,
                 cache_name: None,
                 custom_prompt: Some(custom_prompt.to_string()),
+                series_range: None,
             },
         );
 

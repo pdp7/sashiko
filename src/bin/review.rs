@@ -378,6 +378,15 @@ async fn main() -> Result<()> {
 
                         let tools = ToolBox::new(worktree.path.clone(), prompts_tool_path);
                         let prompts = PromptRegistry::new(args.prompts.clone());
+
+                        // Calculate series range (baseline..last_patch)
+                        let series_range = patches
+                            .iter()
+                            .map(|p| p.index)
+                            .max()
+                            .and_then(|max_idx| patch_shas.get(&max_idx))
+                            .map(|end_sha| format!("{}..{}", baseline_sha, end_sha));
+
                         let mut worker = Worker::new(
                             provider,
                             tools,
@@ -388,6 +397,7 @@ async fn main() -> Result<()> {
                                 temperature: settings.ai.temperature,
                                 cache_name: args.gemini_cache.clone(),
                                 custom_prompt: args.custom_prompt.clone(),
+                                series_range,
                             },
                         );
 
