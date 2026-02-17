@@ -347,7 +347,7 @@ mod tests {
         // Verify history contains the custom prompt
         // history[0] is the user prompt
         let initial_message = &result.history[0];
-        if let crate::ai::Part::Text { text, .. } = &initial_message.parts[0] {
+        if let Some(text) = &initial_message.content {
             assert!(
                 text.contains(custom_prompt),
                 "User prompt should contain custom prompt"
@@ -357,7 +357,7 @@ mod tests {
                 "User prompt should contain patch content"
             );
         } else {
-            panic!("Expected text part in history[0]");
+            panic!("Expected content in history[0]");
         }
     }
 }
