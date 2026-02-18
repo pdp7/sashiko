@@ -282,13 +282,15 @@ impl Reviewer {
         let patches_json: Vec<_> = diffs
             .iter()
             .map(|(_id, idx, diff, subj, auth, date, msg_id)| {
+                let is_sha = msg_id.len() == 40 && msg_id.chars().all(|c| c.is_ascii_hexdigit());
                 json!({
                     "index": idx,
                     "diff": diff,
                     "subject": subj,
                     "author": auth,
                     "date": date,
-                    "message_id": msg_id
+                    "message_id": msg_id,
+                    "commit_id": if is_sha { Some(msg_id) } else { None }
                 })
             })
             .collect();

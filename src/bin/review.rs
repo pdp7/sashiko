@@ -84,6 +84,8 @@ struct PatchInput {
     date: Option<i64>,
     #[serde(default)]
     message_id: Option<String>,
+    #[serde(default)]
+    commit_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -516,11 +518,43 @@ async fn apply_single_patch(
     patch_shows: &mut std::collections::HashMap<i64, String>,
     patch_results: &mut Vec<serde_json::Value>,
 ) -> bool {
-    // Check if message_id is a valid commit SHA available in the repo
+    // Check if commit_id is present (preferred over message_id guessing)
+    if let Some(sha) = &p.commit_id {
+        info!(
+            "Patch {} is identified by commit ID {}, attempting direct checkout...",
+            p.index, sha
+        );
+        match worktree.reset_hard(sha).await {
+            Ok(_) => {
+                if let Ok(show) = worktree.get_commit_show(sha).await {
+                    patch_shows.insert(p.index, show);
+                }
+                patch_shas.insert(p.index, sha.clone());
+                patch_results.push(json!({
+                    "index": p.index,
+                    "status": "applied",
+                    "method": "checkout"
+                }));
+                return true;
+            }
+            Err(e) => {
+                error!("Failed to checkout commit {}: {}", sha, e);
+                patch_results.push(json!({
+                    "index": p.index,
+                    "status": "error",
+                    "method": "checkout",
+                    "error": e.to_string()
+                }));
+                return false;
+            }
+        }
+    }
+
+    // Legacy fallback: Check if message_id looks like a SHA
     if let Some(sha) = &p.message_id {
         if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
             info!(
-                "Patch {} is identified by SHA {}, attempting direct checkout...",
+                "Patch {} message_id looks like a SHA {}, checking out...",
                 p.index, sha
             );
             match worktree.reset_hard(sha).await {
@@ -544,9 +578,6 @@ async fn apply_single_patch(
                         "method": "checkout",
                         "error": e.to_string()
                     }));
-                    // If we have a SHA ID, we MUST be able to checkout it.
-                    // Do not fallback to apply, as that implies we are applying a patch
-                    // on top of a baseline, which might be wrong if this is a remote commit.
                     return false;
                 }
             }
@@ -706,16 +737,15 @@ mod tests {
         // 2. Setup Worktree on Initial commit (Baseline)
         let worktree = GitWorktree::new(&repo_path, &initial_sha, None).await?;
 
-        // 3. Prepare PatchInput with feature_sha as message_id and BROKEN diff
-        // We use a broken diff to prove that the code ignores it and successfully
-        // checks out the commit by SHA. If it fell back to patching, it would fail.
+        // 3. Prepare PatchInput with feature_sha as commit_id and BROKEN diff
         let patch = PatchInput {
             index: 1,
             diff: "INVALID DIFF content that would fail git apply".to_string(),
             subject: Some("Feature".to_string()),
             author: Some("Test User <test@example.com>".to_string()),
             date: None,
-            message_id: Some(feature_sha.clone()),
+            message_id: Some("some-msg-id".to_string()),
+            commit_id: Some(feature_sha.clone()),
         };
 
         let mut patch_shas = std::collections::HashMap::new();
@@ -793,7 +823,8 @@ mod tests {
             subject: Some("Feature".to_string()),
             author: Some("Test User <test@example.com>".to_string()),
             date: None,
-            message_id: Some(missing_sha.clone()),
+            message_id: Some("some-msg-id".to_string()),
+            commit_id: Some(missing_sha.clone()),
         };
 
         let mut patch_shas = std::collections::HashMap::new();
@@ -817,6 +848,61 @@ mod tests {
         let result = &patch_results[0];
         assert_eq!(result["status"], "error");
         assert_eq!(result["method"], "checkout"); // Failed at checkout stage
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_apply_single_patch_legacy_message_id_sha() -> Result<()> {
+        // Test backward compatibility where message_id is a SHA and commit_id is None
+        let temp_dir = tempfile::tempdir()?;
+        let repo_path = temp_dir.path().to_path_buf();
+
+        Command::new("git").current_dir(&repo_path).arg("init").output()?;
+        Command::new("git").current_dir(&repo_path).args(["config", "user.email", "test@example.com"]).output()?;
+        Command::new("git").current_dir(&repo_path).args(["config", "user.name", "Test User"]).output()?;
+
+        let file_path = repo_path.join("file.txt");
+        let mut file = File::create(&file_path)?;
+        writeln!(file, "Initial")?;
+        Command::new("git").current_dir(&repo_path).args(["add", "."]).output()?;
+        Command::new("git").current_dir(&repo_path).args(["commit", "-m", "Initial"]).output()?;
+        let initial_sha = sashiko::git_ops::get_commit_hash(&repo_path, "HEAD").await?;
+
+        writeln!(file, "Change")?;
+        Command::new("git").current_dir(&repo_path).args(["add", "."]).output()?;
+        Command::new("git").current_dir(&repo_path).args(["commit", "-m", "Feature"]).output()?;
+        let feature_sha = sashiko::git_ops::get_commit_hash(&repo_path, "HEAD").await?;
+
+        let worktree = GitWorktree::new(&repo_path, &initial_sha, None).await?;
+
+        let patch = PatchInput {
+            index: 1,
+            diff: "INVALID".to_string(),
+            subject: Some("Feature".to_string()),
+            author: Some("Test User <test@example.com>".to_string()),
+            date: None,
+            message_id: Some(feature_sha.clone()),
+            commit_id: None,
+        };
+
+        let mut patch_shas = std::collections::HashMap::new();
+        let mut patch_shows = std::collections::HashMap::new();
+        let mut patch_results = Vec::new();
+
+        let success = apply_single_patch(
+            &worktree,
+            &patch,
+            &mut patch_shas,
+            &mut patch_shows,
+            &mut patch_results,
+        )
+        .await;
+
+        assert!(success);
+        assert_eq!(patch_results[0]["status"], "applied");
+        assert_eq!(patch_results[0]["method"], "checkout");
+        assert!(std::fs::read_to_string(worktree.path.join("file.txt"))?.contains("Change"));
 
         Ok(())
     }
