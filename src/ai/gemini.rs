@@ -237,18 +237,35 @@ impl std::fmt::Display for GeminiError {
 impl std::error::Error for GeminiError {}
 
 pub struct GeminiClient {
-    api_key: String,
     model: String,
+    base_url: String,
     client: Client,
 }
 
 impl GeminiClient {
     pub fn new(model: String) -> Self {
-        let api_key = std::env::var("LLM_API_KEY").unwrap_or_default();
+        let api_key = std::env::var("GEMINI_API_KEY")
+            .or_else(|_| std::env::var("LLM_API_KEY"))
+            .unwrap_or_default();
+        let base_url = std::env::var("GOOGLE_GEMINI_BASE_URL")
+            .or_else(|_| std::env::var("GEMINI_BASE_URL"))
+            .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        if !api_key.is_empty() {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&api_key) {
+                headers.insert("x-goog-api-key", value);
+            }
+        }
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
-            api_key,
             model,
-            client: Client::new(),
+            base_url,
+            client,
         }
     }
 
@@ -259,8 +276,8 @@ impl GeminiClient {
         tracing::info!("Sending Gemini request...");
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            "{}/v1beta/models/{}:generateContent",
+            self.base_url, self.model
         );
         self.post_request(&url, request).await
     }
@@ -275,8 +292,8 @@ impl GeminiClient {
         // in favor of the 'cached_content' field, but we still need a valid endpoint.
         // The documentation says: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            "{}/v1beta/models/{}:generateContent",
+            self.base_url, self.model
         );
         self.post_request(&url, request).await
     }
@@ -388,10 +405,7 @@ impl GenAiClient for GeminiClient {
         &self,
         request: CreateCachedContentRequest,
     ) -> Result<CachedContent> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key={}",
-            self.api_key
-        );
+        let url = format!("{}/v1beta/cachedContents", self.base_url);
         let res = self.client.post(&url).json(&request).send().await?;
 
         if res.status().is_success() {
@@ -406,10 +420,7 @@ impl GenAiClient for GeminiClient {
     }
 
     async fn list_cached_contents(&self) -> Result<Vec<CachedContent>> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key={}",
-            self.api_key
-        );
+        let url = format!("{}/v1beta/cachedContents", self.base_url);
         let res = self.client.get(&url).send().await?;
 
         if res.status().is_success() {
@@ -429,10 +440,7 @@ impl GenAiClient for GeminiClient {
     }
 
     async fn delete_cached_content(&self, name: &str) -> Result<()> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/{}?key={}",
-            name, self.api_key
-        );
+        let url = format!("{}/v1beta/{}", self.base_url, name);
         let res = self.client.delete(&url).send().await?;
 
         if res.status().is_success() {
