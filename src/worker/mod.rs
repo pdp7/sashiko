@@ -504,8 +504,19 @@ impl Worker {
                 self.history.extend(tool_responses);
                 // Continue loop to get model response to tool outputs
             } else if let Some(final_text) = resp.content {
+                // Strip <think>...</think> blocks if present
+                let mut stripped_text = final_text.trim().to_string();
+                while let Some(start) = stripped_text.find("<think>") {
+                    if let Some(end) = stripped_text[start..].find("</think>") {
+                        stripped_text.replace_range(start..start + end + 8, "");
+                    } else {
+                        // Unclosed <think>, just strip from start to end
+                        stripped_text.replace_range(start.., "");
+                    }
+                }
+                let clean_text = stripped_text.trim();
+
                 // Try to clean up markdown code blocks if present
-                let clean_text = final_text.trim();
                 let clean_text = if clean_text.starts_with("```json") {
                     clean_text
                         .strip_prefix("```json")
@@ -528,7 +539,7 @@ impl Worker {
                     Ok(v) => v,
                     Err(e) => {
                         // Fallback: scan for JSON objects
-                        let candidates = find_json_candidates(final_text.as_str());
+                        let candidates = find_json_candidates(stripped_text.as_str());
                         if let Some(v) = candidates.last() {
                             v.clone()
                         } else {
@@ -536,7 +547,7 @@ impl Worker {
                                 output: None,
                                 error: Some(format!(
                                     "Failed to parse JSON response: {}. Text: {}",
-                                    e, final_text
+                                    e, stripped_text
                                 )),
                                 input_context,
                                 history: self.history.clone(),

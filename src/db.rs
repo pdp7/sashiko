@@ -1508,12 +1508,20 @@ impl Database {
         strict_author: bool,
     ) -> Result<Option<i64>> {
         // 1. Try to find by cover_letter_message_id first (handles placeholders from API/Fetcher)
+        let mut clid_candidates = Vec::new();
         if let Some(clid) = cover_letter_message_id {
+            clid_candidates.push(clid.to_string());
+        }
+        // Fallback for single-patch git imports where placeholder is sha@sashiko.local
+        // but the actual cover letter becomes the sha itself.
+        clid_candidates.push(format!("{}@sashiko.local", message_id));
+
+        for clid in clid_candidates {
             let mut rows = self
                 .conn
                 .query(
                     "SELECT id, date, author, subject, subject_index, total_parts FROM patchsets WHERE cover_letter_message_id = ?",
-                    libsql::params![clid],
+                    libsql::params![clid.clone()],
                 )
                 .await?;
             if let Ok(Some(row)) = rows.next().await {
@@ -1535,6 +1543,13 @@ impl Database {
                     "UPDATE patchsets SET thread_id = ?, author = ?, total_parts = ?, parser_version = ?, to_recipients = ?, cc_recipients = ? WHERE id = ?",
                     libsql::params![thread_id, author, final_total, parser_version, to, cc, id],
                 ).await?;
+
+                if let Some(real_clid) = cover_letter_message_id {
+                    self.conn.execute(
+                        "UPDATE patchsets SET cover_letter_message_id = ? WHERE id = ?",
+                        libsql::params![real_clid, id],
+                    ).await?;
+                }
 
                 if let Some(bid) = baseline_id {
                     self.conn
