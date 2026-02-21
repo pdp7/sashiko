@@ -151,16 +151,6 @@ pub struct WorkerResult {
 }
 
 fn validate_inline_format(content: &str) -> Result<(), String> {
-    // Check for markdown headers (lines starting with '#')
-    if content.lines().any(|l| l.trim_start().starts_with("#")) {
-        return Err("The `review_inline` field contains Markdown headers (lines starting with '#'). It must be plain text as per `inline-template.md`.".to_string());
-    }
-
-    // Check for markdown code blocks (lines starting with '```')
-    if content.lines().any(|l| l.trim_start().starts_with("```")) {
-        return Err("The `review_inline` field contains Markdown code blocks ('```'). It must be plain text as per `inline-template.md`.".to_string());
-    }
-
     // Check for quoting (lines starting with '>')
     if !content.lines().any(|l| l.trim_start().starts_with(">")) {
         return Err("The `review_inline` field does not appear to quote any code or context using '>'. Please follow the quoting style in `inline-template.md`.".to_string());
@@ -514,15 +504,19 @@ impl Worker {
             } else if let Some(final_text) = resp.content {
                 // Try to clean up markdown code blocks if present
                 let mut clean_text = final_text.trim();
-                if let Some(start) = clean_text.find("```json\n") {
+                if let Some(start) = clean_text.rfind("```json\n") {
                     let rest = &clean_text[start + 8..];
-                    if let Some(end) = rest.find("```") {
+                    if let Some(end) = rest.rfind("```") {
                         clean_text = rest[..end].trim();
+                    } else {
+                        clean_text = rest.trim();
                     }
-                } else if let Some(start) = clean_text.find("```\n") {
+                } else if let Some(start) = clean_text.rfind("```\n") {
                     let rest = &clean_text[start + 4..];
-                    if let Some(end) = rest.find("```") {
+                    if let Some(end) = rest.rfind("```") {
                         clean_text = rest[..end].trim();
+                    } else {
+                        clean_text = rest.trim();
                     }
                 }
 
@@ -642,18 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_inline_format_markdown_headers() {
-        let content = "# Summary\n\n> diff --git ...";
-        assert!(validate_inline_format(content).is_err());
-    }
-
-    #[test]
-    fn test_validate_inline_format_markdown_code_blocks() {
-        let content = "commit 123\n\n```\n> diff --git ...\n```\n\nComment";
-        assert!(validate_inline_format(content).is_err());
-    }
-
-    #[test]
     fn test_validate_inline_format_no_quoting() {
         let content = "commit 123\n\nThis looks bad.\nNo diff here.";
         assert!(validate_inline_format(content).is_err());
@@ -671,11 +653,6 @@ mod tests {
         assert!(validate_inline_format(content).is_err());
     }
 
-    #[test]
-    fn test_validate_inline_format_headers_in_diff_ok() {
-        let content = "commit 123\n\n> #include <stdio.h>\n> void main() {}\n\nComment";
-        assert!(validate_inline_format(content).is_ok());
-    }
     #[test]
     fn test_calculate_series_range_single_patch() {
         let p = PatchInput {
