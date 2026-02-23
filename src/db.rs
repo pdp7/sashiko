@@ -2534,6 +2534,14 @@ impl Database {
         Ok(())
     }
 
+    pub async fn restart_failed_reviews(&self) -> Result<u64> {
+        let count = self.conn.execute(
+            "UPDATE patchsets SET status = 'Pending', failed_reason = NULL WHERE status = 'Failed'",
+            libsql::params![],
+        ).await?;
+        Ok(count)
+    }
+
     pub async fn rerun_patchset(&self, id: i64) -> Result<()> {
         // 1. Reset patchset status to Pending
         self.conn
