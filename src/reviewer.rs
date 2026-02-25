@@ -162,14 +162,15 @@ impl Reviewer {
         }
 
         // Ensure Context Cache
-        if self
+        let use_explicit_caching = self
             .settings
             .ai
             .gemini
             .as_ref()
             .map(|g| g.explicit_prompt_caching)
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+
+        if !self.settings.ai.no_ai && use_explicit_caching {
             match self.cache_manager.ensure_cache(None).await {
                 Ok(name) => {
                     info!("AI Context Cache initialized: {}", name);
@@ -183,7 +184,7 @@ impl Reviewer {
                     );
                 }
             }
-        } else {
+        } else if !self.settings.ai.no_ai {
             info!("Explicit caching disabled via settings.");
         }
 
