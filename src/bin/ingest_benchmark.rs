@@ -14,6 +14,7 @@
 
 use clap::Parser;
 use reqwest::Client;
+use sashiko::settings::Settings;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
@@ -24,6 +25,10 @@ struct Args {
     /// Path to the benchmark file
     #[arg(short, long)]
     file: String,
+
+    /// Override the default port (reads from settings by default)
+    #[arg(short, long)]
+    port: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +46,11 @@ enum SubmitRequest {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+
+    // Load settings to get the default port
+    let settings = Settings::new()?;
+    let port = args.port.unwrap_or(settings.server.port);
+
     let file = File::open(&args.file)?;
     let reader = BufReader::new(file);
     let entries: Vec<BenchmarkEntry> = serde_json::from_reader(reader)?;
@@ -49,6 +59,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo_url = "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git";
 
     println!("Found {} entries to process", entries.len());
+
+    let target_url = format!("http://127.0.0.1:{}/api/submit", port);
 
     for entry in entries {
         println!("Processing commit: {}", entry.commit);
@@ -59,11 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             repo: repo_url.to_string(),
         };
 
-        let res = client
-            .post("http://127.0.0.1:8080/api/submit")
-            .json(&payload)
-            .send()
-            .await;
+        let res = client.post(&target_url).json(&payload).send().await;
 
         match res {
             Ok(response) => {
