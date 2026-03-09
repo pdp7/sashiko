@@ -296,58 +296,76 @@ async fn process_entry(
         problem_description, findings_text, review_summary
     );
 
-    let req = GenerateContentRequest {
-        contents: vec![Content {
-            role: "user".to_string(),
-            parts: vec![Part::Text {
-                text: prompt,
-                thought_signature: None,
-                thought: false,
+    info!("Evaluating commit {} with Gemini...", entry.commit);
+
+    let r = loop {
+        let req = GenerateContentRequest {
+            contents: vec![Content {
+                role: "user".to_string(),
+                parts: vec![Part::Text {
+                    text: prompt.clone(),
+                    thought_signature: None,
+                    thought: false,
+                }],
             }],
-        }],
-        tools: None,
-        system_instruction: None,
-        generation_config: None,
+            tools: None,
+            system_instruction: None,
+            generation_config: None,
+        };
+
+        match client.generate_content(req).await {
+            Ok(r) => break r,
+            Err(e) => {
+                if let Some(err) = e.downcast_ref::<sashiko::ai::gemini::GeminiError>() {
+                    match err {
+                        sashiko::ai::gemini::GeminiError::QuotaExceeded(duration) => {
+                            warn!("Quota exceeded, pausing for {:?}...", duration);
+                            tokio::time::sleep(*duration).await;
+                            continue;
+                        }
+                        sashiko::ai::gemini::GeminiError::TransientError(duration, _) => {
+                            warn!("Transient error, pausing for {:?}...", duration);
+                            tokio::time::sleep(*duration).await;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                warn!("API error ({}), pausing for 30s before retry...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        }
     };
 
-    info!("Evaluating commit {} with Gemini...", entry.commit);
-    let resp = client.generate_content(req).await;
+    let (status, explanation) = {
+        let text = r
+            .candidates
+            .as_ref()
+            .and_then(|c| c.first())
+            .and_then(|c| c.content.parts.first())
+            .map(|p| {
+                if let Part::Text { text, .. } = p {
+                    text.clone()
+                } else {
+                    "Unknown".to_string()
+                }
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
 
-    let (status, explanation) = match resp {
-        Ok(r) => {
-            let text = r
-                .candidates
-                .as_ref()
-                .and_then(|c| c.first())
-                .and_then(|c| c.content.parts.first())
-                .map(|p| {
-                    if let Part::Text { text, .. } = p {
-                        text.clone()
-                    } else {
-                        "Unknown".to_string()
-                    }
-                })
-                .unwrap_or_else(|| "Unknown".to_string());
+        let re_status = Regex::new(r"(?i)\b(DETECTED|PARTIALLY_DETECTED|MISSED)\b").unwrap();
+        let (status_raw, expl_raw) = if let Some(cap) = re_status.captures(&text) {
+            let s = cap[1].to_uppercase();
+            let remaining = re_status.replace(&text, "").to_string();
+            (s, remaining)
+        } else {
+            ("UNKNOWN".to_string(), text.clone())
+        };
 
-            let re_status = Regex::new(r"(?i)\b(DETECTED|PARTIALLY_DETECTED|MISSED)\b").unwrap();
-            let (status_raw, expl_raw) = if let Some(cap) = re_status.captures(&text) {
-                let s = cap[1].to_uppercase();
-                let remaining = re_status.replace(&text, "").to_string();
-                (s, remaining)
-            } else {
-                ("UNKNOWN".to_string(), text.clone())
-            };
-
-            let expl = expl_raw
-                .trim()
-                .trim_start_matches([':', '-', ' ', '\n'])
-                .to_string();
-            (status_raw, expl)
-        }
-        Err(e) => {
-            error!("Error calling Gemini for commit {}: {}", entry.commit, e);
-            ("ERROR".to_string(), e.to_string())
-        }
+        let expl = expl_raw
+            .trim()
+            .trim_start_matches([':', '-', ' ', '\n'])
+            .to_string();
+        (status_raw, expl)
     };
 
     let found = status == "DETECTED" || status == "PARTIALLY_DETECTED";
