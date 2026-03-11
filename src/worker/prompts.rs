@@ -116,7 +116,10 @@ impl PromptRegistry {
     /// This is used for:
     /// 1. Populating the Context Cache.
     /// 2. Constructing the full prompt in non-cached mode.
-    pub async fn build_context(&self, selected_prompts: Option<&[String]>) -> Result<(String, String)> {
+    pub async fn build_context(
+        &self,
+        selected_prompts: Option<&[String]>,
+    ) -> Result<(String, String)> {
         let mut clean = String::with_capacity(50_000);
         let mut clean_files = Vec::new();
         let mut content = String::with_capacity(50_000);
@@ -409,7 +412,10 @@ impl Worker {
                 Ok(subsystem_md) => {
                     info!("Executing Phase 0: Pre-screening relevant subsystem guides.");
                     let phase0_system = "You are an AI assistant preparing a Linux kernel patch review.\nReview the provided Patch and select all potentially relevant subsystem guides from the index below.\nCRITICAL BIAS RULE: You MUST err on the side of inclusion. Only exclude a guide if it is 100% irrelevant to the modified code. If there is any doubt, include the file.";
-                    let phase0_prompt = format!("<subsystem_guide_index>\n{}\n</subsystem_guide_index>\n\n<patch>\n{}\n</patch>", subsystem_md, target_commit_diff);
+                    let phase0_prompt = format!(
+                        "<subsystem_guide_index>\n{}\n</subsystem_guide_index>\n\n<patch>\n{}\n</patch>",
+                        subsystem_md, target_commit_diff
+                    );
                     let schema = json!({
                         "type": "object",
                         "properties": {
@@ -420,7 +426,7 @@ impl Worker {
                         },
                         "required": ["selected_prompts"]
                     });
-                    
+
                     let req = AiRequest {
                         system: Some(phase0_system.to_string()),
                         messages: vec![AiMessage {
@@ -432,7 +438,9 @@ impl Worker {
                         }],
                         tools: None,
                         temperature: Some(0.0),
-                        response_format: Some(AiResponseFormat::Json { schema: Some(schema) }),
+                        response_format: Some(AiResponseFormat::Json {
+                            schema: Some(schema),
+                        }),
                     };
 
                     match self.provider.generate_content(req).await {
@@ -445,12 +453,19 @@ impl Worker {
                             if let Some(content) = resp.content {
                                 match serde_json::from_str::<Value>(&content) {
                                     Ok(val) => {
-                                        if let Some(arr) = val.get("selected_prompts").and_then(|v| v.as_array()) {
-                                            let prompts: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+                                        if let Some(arr) =
+                                            val.get("selected_prompts").and_then(|v| v.as_array())
+                                        {
+                                            let prompts: Vec<String> = arr
+                                                .iter()
+                                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                .collect();
                                             info!("Phase 0 selected prompts: {:?}", prompts);
                                             Some(prompts)
                                         } else {
-                                            warn!("Phase 0 JSON did not contain 'selected_prompts' array");
+                                            warn!(
+                                                "Phase 0 JSON did not contain 'selected_prompts' array"
+                                            );
                                             None
                                         }
                                     }
@@ -476,11 +491,17 @@ impl Worker {
                 }
             }
         } else {
-            warn!("subsystem.md not found for Phase 0 at {:?}", subsystem_md_path);
+            warn!(
+                "subsystem.md not found for Phase 0 at {:?}",
+                subsystem_md_path
+            );
             None
         };
 
-        let (static_context, clean_static_context) = self.prompts.build_context(selected_prompts.as_deref()).await?;
+        let (static_context, clean_static_context) = self
+            .prompts
+            .build_context(selected_prompts.as_deref())
+            .await?;
 
         let mut dynamic_context = String::new();
         dynamic_context.push_str("\n\nTarget Commit:\n");
