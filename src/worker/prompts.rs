@@ -142,15 +142,6 @@ impl PromptRegistry {
                 !matches!(name, "README.md" | "subsystem-template.md")
             })
             .await?;
-
-            // Explicitly load nfsd from subsystem if it exists
-            self.append_directory(
-                &mut content,
-                &mut clean_files,
-                &subsystem_dir.join("nfsd"),
-                |_| true,
-            )
-            .await?;
         }
 
         // Specific Pattern Directories
