@@ -82,6 +82,7 @@ pub struct WorkerConfig {
     pub temperature: f32,
     pub custom_prompt: Option<String>,
     pub series_range: Option<String>,
+    pub stages: Option<Vec<u8>>,
 }
 
 pub struct WorkerResult {
@@ -363,6 +364,7 @@ pub struct Worker {
     temperature: f32,
     series_range: Option<String>,
     context_tag: Option<String>,
+    stages: Option<Vec<u8>>,
 }
 
 impl Worker {
@@ -381,6 +383,7 @@ impl Worker {
             temperature: config.temperature,
             series_range: config.series_range,
             context_tag: None,
+            stages: config.stages,
         }
     }
 
@@ -549,6 +552,12 @@ impl Worker {
 
         // Stages 1-7
         for stage in 1..=7 {
+            if let Some(ref selected_stages) = self.stages
+                && !selected_stages.contains(&stage)
+            {
+                continue;
+            }
+
             info!("Running Stage {}", stage);
             let (stage_prompt, clean_stage_prompt) = self.prompts.get_stage_prompt(stage).await?;
             let system_prompt = shared_context.clone();
@@ -1293,6 +1302,7 @@ mod tests {
             temperature: 0.0,
             series_range: None,
             custom_prompt: None,
+            stages: None,
         };
         let mut worker = Worker::new(provider, tools, prompts, config);
 

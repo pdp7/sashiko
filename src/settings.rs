@@ -184,6 +184,8 @@ pub struct ReviewSettings {
     /// (e.g. in tests or via environment).
     #[serde(skip)]
     pub review_tool_override: Option<std::path::PathBuf>,
+    #[serde(skip)]
+    pub stages: Option<Vec<u8>>,
 }
 
 fn default_max_total_tokens() -> usize {

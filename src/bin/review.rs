@@ -73,6 +73,10 @@ struct Args {
     /// Custom prompt string to append to the user task prompt.
     #[arg(long)]
     custom_prompt: Option<String>,
+
+    /// Select which stages from 1-7 to run.
+    #[arg(long, hide = true, value_delimiter = ',')]
+    stages: Option<Vec<u8>>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -392,8 +396,9 @@ async fn main() -> Result<()> {
                                 max_input_tokens: settings.ai.max_input_tokens,
                                 max_interactions: settings.ai.max_interactions,
                                 temperature: settings.ai.temperature,
-                                                                custom_prompt: args.custom_prompt.clone(),
+                                custom_prompt: args.custom_prompt.clone(),
                                 series_range,
+                                stages: args.stages.clone(),
                             },
                         );
 

@@ -55,6 +55,10 @@ struct Cli {
     #[arg(long)]
     enable_unsafe_all_submit: bool,
 
+    /// Debug feature: select which stages from 1-7 to run
+    #[arg(long, hide = true, value_delimiter = ',')]
+    stages: Option<Vec<u8>>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -142,6 +146,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(port) = cli.port {
         settings.server.port = port;
         info!("Server port overridden via --port flag: {}", port);
+    }
+
+    if let Some(stages) = cli.stages {
+        settings.review.stages = Some(stages.clone());
+        info!("Selected stages via --stages flag: {:?}", stages);
     }
 
     // Initialize Database

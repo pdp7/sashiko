@@ -1320,6 +1320,15 @@ async fn run_review_tool(
         cmd.arg("--reuse-worktree").arg(path);
     }
 
+    if let Some(stages) = &settings.review.stages {
+        let stages_str = stages
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        cmd.arg("--stages").arg(stages_str);
+    }
+
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
