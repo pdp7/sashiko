@@ -150,6 +150,28 @@ pub trait GenAiClient: Send + Sync {
     ) -> Result<GenerateContentResponse>;
 }
 
+fn extract_gemini_error_reason(error_text: &str) -> Option<String> {
+    let json = serde_json::from_str::<serde_json::Value>(error_text).ok()?;
+    let err = json.get("error")?;
+
+    let reason = err
+        .get("details")
+        .and_then(|d| d.as_array())
+        .and_then(|a| a.first())
+        .and_then(|f| f.get("reason"))
+        .and_then(|r| r.as_str());
+
+    let message = err.get("message").and_then(|m| m.as_str());
+
+    if let Some(r) = reason {
+        return Some(r.to_string());
+    } else if let Some(m) = message {
+        return Some(m.to_string());
+    }
+
+    None
+}
+
 #[derive(Debug)]
 pub enum GeminiError {
     QuotaExceeded(Duration),
@@ -166,8 +188,20 @@ impl std::fmt::Display for GeminiError {
             GeminiError::TransientError(d, msg) => {
                 write!(f, "Transient error: {}, retry in {:?}", msg, d)
             }
-            GeminiError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
-            GeminiError::ApiError(s, msg) => write!(f, "Gemini API error ({}): {}", s, msg),
+            GeminiError::PermissionDenied(msg) => {
+                if let Some(reason) = extract_gemini_error_reason(msg) {
+                    write!(f, "Permission denied (reason: {}): {}", reason, msg)
+                } else {
+                    write!(f, "Permission denied: {}", msg)
+                }
+            }
+            GeminiError::ApiError(s, msg) => {
+                if let Some(reason) = extract_gemini_error_reason(msg) {
+                    write!(f, "Gemini API error ({}) (reason: {}): {}", s, reason, msg)
+                } else {
+                    write!(f, "Gemini API error ({}): {}", s, msg)
+                }
+            }
             GeminiError::Other(msg) => write!(f, "{}", msg),
         }
     }
@@ -295,7 +329,15 @@ impl GeminiClient {
         let error_text = res.text().await?;
 
         if status == reqwest::StatusCode::FORBIDDEN {
-            tracing::error!("Gemini Permission Denied (403): {}", error_text);
+            let mut reason_str = String::new();
+            if let Some(reason) = extract_gemini_error_reason(&error_text) {
+                reason_str = format!(" (reason: {})", reason);
+            }
+            tracing::error!(
+                "Gemini Permission Denied (403){}: {}",
+                reason_str,
+                error_text
+            );
             return Err(GeminiError::PermissionDenied(error_text).into());
         }
 
@@ -309,7 +351,17 @@ impl GeminiClient {
             return Err(GeminiError::TransientError(Duration::from_secs(30), error_text).into());
         }
 
-        tracing::error!("Gemini API Error: status={}, body={}", status, error_text);
+        let mut reason_str = String::new();
+        if let Some(reason) = extract_gemini_error_reason(&error_text) {
+            reason_str = format!(" (reason: {})", reason);
+        }
+
+        tracing::error!(
+            "Gemini API Error{}: status={}, body={}",
+            reason_str,
+            status,
+            error_text
+        );
         Err(GeminiError::ApiError(status, error_text).into())
     }
 }
