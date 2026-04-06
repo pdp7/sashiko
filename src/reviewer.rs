@@ -1842,7 +1842,7 @@ impl Reviewer {
 
                 footer.push_str(&format!("\n\n-- \nSashiko AI review · {}", target_url));
 
-                let final_body = format!("{}{}{}", header, inline_review, footer);
+                let final_body = format!("{}{}{}", header, inline_review.trim_end(), footer);
 
                 let status = match &ctx.settings.smtp {
                     None => "Disabled",
