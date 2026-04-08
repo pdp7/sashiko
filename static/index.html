@@ -1046,6 +1046,33 @@
             document.getElementById('aboutModal').classList.remove('open');
         }
 
+        function parseAuthor(authorStr) {
+            if (!authorStr) return { name: '', email: 'unknown' };
+            authorStr = authorStr.trim();
+            
+            const match = authorStr.match(/^(?:"?([^"]*)"?\s+)?<([^>]+)>$/);
+            if (match) {
+                let name = match[1] ? match[1].trim() : '';
+                const email = match[2].trim();
+                
+                if (name.toLowerCase() === 'unknown') {
+                    name = '';
+                }
+                
+                return { name, email };
+            }
+            
+            if (authorStr.includes('@')) {
+                return { name: '', email: authorStr };
+            }
+            
+            if (authorStr.toLowerCase() === 'unknown') {
+                return { name: '', email: 'unknown' };
+            }
+            
+            return { name: authorStr, email: '' };
+        }
+
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') closeAbout();
         });
@@ -1403,19 +1430,13 @@
                 `;
 
                 // Parse author
-                let authorName = p.author || 'unknown';
-                let authorEmail = '';
-                const emailMatch = authorName.match(/^(.*?)\s*<(.+)>$/);
-                if (emailMatch) {
-                    authorName = emailMatch[1].trim();
-                    authorEmail = emailMatch[2].trim();
-                } else if (authorName.includes('@')) {
-                    authorEmail = authorName;
-                }
+                const author = parseAuthor(p.author);
+                const nameToDisplay = author.name || author.email;
+                const emailToDisplay = author.name ? author.email : '';
 
                 const authorHtml = `
-                    <div>${escapeHtml(authorName)}</div>
-                    <div style="color:#666; font-size:0.85em;">${escapeHtml(authorEmail)}</div>
+                    <div>${escapeHtml(nameToDisplay)}</div>
+                    ${emailToDisplay ? `<div style="color:#666; font-size:0.85em;">${escapeHtml(emailToDisplay)}</div>` : ''}
                 `;
 
                 if (state.listMode === 'patchsets') {
@@ -1901,7 +1922,10 @@
                 ${failureHtml}
 
                 <div class="section">
-                    <div class="kv"><div class="label">Author:</div><div>${escapeHtml(data.author) || 'unknown'}</div></div>
+                    <div class="kv"><div class="label">Author:</div><div>${(() => {
+                        const a = parseAuthor(data.author);
+                        return escapeHtml(a.name ? `${a.name} <${a.email}>` : a.email);
+                    })()}</div></div>
                     <div class="kv"><div class="label">Date:</div><div>${date}</div></div>
                     <div class="kv"><div class="label">Subsystems:</div><div>${subsystemsHtml}</div></div>
                     <div class="kv"><div class="label">Patches:</div><div>${data.received_parts || 0} / ${data.total_parts || 0}</div></div>
@@ -2123,7 +2147,9 @@
             function renderNode(m, depth) {
                 const mDate = m.date ? formatDate(m.date) : '-';
                 const arrow = depth > 0 ? '↳ ' : '';
-                html += `<li>${arrow}<span class="date">[${mDate}]</span> ${escapeHtml((m.author || 'unknown').trim())}: <a href="#/message/${encodeURIComponent(m.message_id)}">${escapeHtml(m.subject || '(no subject)')}</a>`;
+                const author = parseAuthor(m.author);
+                const authorStr = author.name ? `${author.name} <${author.email}>` : author.email;
+                html += `<li>${arrow}<span class="date">[${mDate}]</span> ${escapeHtml(authorStr)}: <a href="#/message/${encodeURIComponent(m.message_id)}">${escapeHtml(m.subject || '(no subject)')}</a>`;
                 const children = childrenMap.get(m.message_id) || [];
                 if (children.length > 0) {
                     html += '<ul>';
@@ -2157,7 +2183,10 @@
                 <h1>${escapeHtml(data.subject) || '(no subject)'}</h1>
                 
                 <div class="message-meta">
-                    <div><span class="label">From:</span> ${escapeHtml(data.author) || 'unknown'}</div>
+                    <div><span class="label">From:</span> ${(() => {
+                        const a = parseAuthor(data.author);
+                        return escapeHtml(a.name ? `${a.name} <${a.email}>` : a.email);
+                    })()}</div>
                     <div><span class="label">To:</span> ${escapeHtml(data.to) || '-'}</div>
                     <div><span class="label">Cc:</span> ${escapeHtml(data.cc) || '-'}</div>
                     <div><span class="label">Date:</span> ${date}</div>
@@ -2197,7 +2226,9 @@ ${escapeHtml((data.body || '(no body)').replace(/\n+$/, ''), true, false)}${data
                 const arrow = depth > 0 ? '↳ ' : '';
                 const isCurrent = m.message_id === currentMsgId;
                 const style = isCurrent ? 'class="current"' : '';
-                html += `<li>${arrow}<span class="date">[${mDate}]</span> ${escapeHtml((m.author || 'unknown').trim())}: <a href="#/message/${encodeURIComponent(m.message_id)}" ${style}>${escapeHtml(m.subject || '(no subject)')}</a>`;
+                const author = parseAuthor(m.author);
+                const authorStr = author.name ? `${author.name} <${author.email}>` : author.email;
+                html += `<li>${arrow}<span class="date">[${mDate}]</span> ${escapeHtml(authorStr)}: <a href="#/message/${encodeURIComponent(m.message_id)}" ${style}>${escapeHtml(m.subject || '(no subject)')}</a>`;
                 const children = childrenMap.get(m.message_id) || [];
                 if (children.length > 0) {
                     html += '<ul>';
