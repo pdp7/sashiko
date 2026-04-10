@@ -14,3 +14,7 @@ mute_all = true
 
 # A list of static email addresses that should always receive a copy (CC'd).
 cc = []
+
+# A list of author email addresses that will be completely ignored by the system,
+# meaning their submissions will never be considered as patches and will never be reviewed.
+ignored_emails = []

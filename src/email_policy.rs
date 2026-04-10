@@ -11,7 +11,7 @@ pub struct PatchworkPolicy {
     pub token: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct EmailPolicyConfig {
     #[serde(default)]
     pub defaults: SubsystemPolicy,
@@ -33,6 +33,8 @@ pub struct SubsystemPolicy {
     pub mute_all: bool,
     #[serde(default)]
     pub cc: Vec<String>,
+    #[serde(default)]
+    pub ignored_emails: Vec<String>,
     #[serde(default)]
     pub patchwork: PatchworkPolicy,
 }

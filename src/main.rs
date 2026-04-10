@@ -464,8 +464,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
 
+            let policy = sashiko::email_policy::EmailPolicyConfig::load("email_policy.toml")
+                .unwrap_or_default();
+
             for article in buffer.drain(..) {
-                match process_parsed_article(&worker_db, article).await {
+                match process_parsed_article(&worker_db, article, &policy).await {
                     ProcessStatus::Ingested => total_ingested += 1,
                     ProcessStatus::Error => total_errors += 1,
                 }
@@ -581,7 +584,11 @@ enum ProcessStatus {
     Error,
 }
 
-async fn process_parsed_article(worker_db: &Database, article: ParsedArticle) -> ProcessStatus {
+async fn process_parsed_article(
+    worker_db: &Database,
+    article: ParsedArticle,
+    policy: &sashiko::email_policy::EmailPolicyConfig,
+) -> ProcessStatus {
     let ParsedArticle {
         group,
         article_id,
@@ -602,7 +609,7 @@ async fn process_parsed_article(worker_db: &Database, article: ParsedArticle) ->
         return ProcessStatus::Ingested; // Successfully handled the failure event
     }
 
-    let metadata = match metadata {
+    let mut metadata = match metadata {
         Some(m) => m,
         None => {
             error!(
@@ -613,7 +620,20 @@ async fn process_parsed_article(worker_db: &Database, article: ParsedArticle) ->
         }
     };
 
-    let patch_opt = patch;
+    let mut patch_opt = patch;
+
+    let author_email = sashiko::patch::extract_email(&metadata.author);
+
+    if sashiko::email_router::EmailRouter::is_ignored_author(
+        policy,
+        &author_email,
+    ) {
+        if metadata.is_patch_or_cover {
+            info!("Ignoring patch/cover from {} according to email policy", author_email);
+        }
+        metadata.is_patch_or_cover = false;
+        patch_opt = None;
+    }
 
     // Resolve baseline ID if provided
     let baseline_id = if let Some(b) = baseline {

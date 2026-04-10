@@ -160,6 +160,33 @@ impl EmailRouter {
             cc: final_cc.into_iter().collect(),
         }
     }
+
+    pub fn is_ignored_author(
+        policy: &EmailPolicyConfig,
+        author_email: &str,
+    ) -> bool {
+        let author_lower = author_email.to_lowercase();
+
+        if policy
+            .defaults
+            .ignored_emails
+            .iter()
+            .any(|e| author_lower.contains(&e.to_lowercase()))
+        {
+            return true;
+        }
+
+        for p in policy.subsystems.values() {
+            if p.ignored_emails
+                .iter()
+                .any(|e| author_lower.contains(&e.to_lowercase()))
+            {
+                return true;
+            }
+        }
+        
+        false
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +206,7 @@ mod tests {
                 cc_maintainers: true,
                 mute_all: false,
                 cc: vec!["mm-bot@test.com".to_string()],
+                ignored_emails: vec![],
                 patchwork: Default::default(),
             },
         );
@@ -191,6 +219,7 @@ mod tests {
                 cc_maintainers: false,
                 mute_all: false,
                 cc: vec![],
+                ignored_emails: vec![],
                 patchwork: Default::default(),
             },
         );
@@ -203,6 +232,7 @@ mod tests {
                 cc_maintainers: true,
                 mute_all: true,
                 cc: vec![],
+                ignored_emails: vec![],
                 patchwork: Default::default(),
             },
         );
@@ -214,6 +244,7 @@ mod tests {
                 cc_maintainers: true,
                 mute_all: false,
                 cc: vec![],
+                ignored_emails: vec![],
                 patchwork: Default::default(),
             },
             subsystems,
