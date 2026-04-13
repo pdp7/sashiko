@@ -3,6 +3,7 @@
 *.db-journal
 *.db-shm
 *.db-wal
+*.db.bak
 .cargo/config.toml
 target/
 archives/
