@@ -458,11 +458,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // info!("Processing batch of {} parsed articles", count); // Too verbose
-            if let Err(e) = worker_db.begin_transaction().await {
-                error!("Failed to begin transaction: {}", e);
-                total_errors += count; // Assume all failed if the transaction fails.
-                continue;
-            }
 
             let policy = sashiko::email_policy::EmailPolicyConfig::load("email_policy.toml")
                 .unwrap_or_default();
@@ -480,13 +475,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         total_processed, total_ingested, total_errors
                     );
                 }
-            }
-
-            if let Err(e) = worker_db.commit_transaction().await {
-                error!("Failed to commit transaction: {}", e);
-                // If commit fails, technically we lost the batch work in DB, but counters are already updated.
-                // For simple stats, this is acceptable, but ideally we'd track "pending" stats.
-                // Keeping it simple.
             }
         }
 

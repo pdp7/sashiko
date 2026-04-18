@@ -180,9 +180,42 @@ impl Database {
              libsql::params![id],
         ).await?;
 
-        if let Ok(Some(row)) = rows.next().await {
-            let thread_id: Option<i64> = row.get(2).ok();
+        let row_data = if let Ok(Some(row)) = rows.next().await {
+            Some((
+                row.get::<i64>(0)?,
+                row.get::<String>(1)?,
+                row.get::<Option<i64>>(2).ok().flatten(),
+                row.get::<Option<String>>(3).ok().flatten(),
+                row.get::<Option<String>>(4).ok().flatten(),
+                row.get::<Option<String>>(5).ok().flatten(),
+                row.get::<Option<i64>>(6).ok().flatten(),
+                row.get::<Option<String>>(7).ok().flatten(),
+                row.get::<Option<String>>(8).ok().flatten(),
+                row.get::<Option<String>>(9).ok().flatten(),
+                row.get::<Option<String>>(10).ok().flatten(),
+                row.get::<Option<String>>(11).ok().flatten(),
+                row.get::<Option<String>>(12).ok().flatten(),
+            ))
+        } else {
+            None
+        };
 
+        if let Some((
+            id,
+            message_id,
+            thread_id,
+            in_reply_to,
+            author,
+            subject,
+            date,
+            body,
+            to,
+            cc,
+            git_blob_hash,
+            mailing_list,
+            raw_diff,
+        )) = row_data
+        {
             // Fetch thread messages
             let mut messages = Vec::new();
             if let Some(tid) = thread_id {
@@ -202,31 +235,28 @@ impl Database {
                 }
             }
 
-            let body: Option<String> = row.get(7).ok();
-            let raw_diff: Option<String> = row.get(12).ok();
-
             // For email-based patches, the diff is often just the body.
             // We don't want to show it twice in the UI.
             // For git commits, body is the commit message and diff is the actual diff.
             let diff = if let (Some(b), Some(d)) = (&body, &raw_diff) {
-                if b == d { None } else { raw_diff }
+                if b == d { None } else { raw_diff.clone() }
             } else {
-                raw_diff
+                raw_diff.clone()
             };
 
             Ok(Some(MessageRow {
-                id: row.get(0)?,
-                message_id: row.get(1)?,
+                id,
+                message_id,
                 thread_id,
-                in_reply_to: row.get(3).ok(),
-                author: row.get(4).ok(),
-                subject: row.get(5).ok(),
-                date: row.get(6).ok(),
+                in_reply_to,
+                author,
+                subject,
+                date,
                 body,
-                to: row.get(8).ok(),
-                cc: row.get(9).ok(),
-                git_blob_hash: row.get(10).ok(),
-                mailing_list: row.get(11).ok(),
+                to,
+                cc,
+                git_blob_hash,
+                mailing_list,
                 diff,
                 thread: Some(messages),
             }))
@@ -244,8 +274,13 @@ impl Database {
             )
             .await?;
 
-        if let Ok(Some(row)) = rows.next().await {
-            let id: i64 = row.get(0)?;
+        let id = if let Ok(Some(row)) = rows.next().await {
+            Some(row.get::<i64>(0)?)
+        } else {
+            None
+        };
+
+        if let Some(id) = id {
             self.get_message_details(id).await
         } else {
             Ok(None)
@@ -3092,7 +3127,7 @@ impl Database {
             )
             .await?;
 
-        let mut reviews = Vec::new();
+        let mut temp_reviews = Vec::new();
         while let Ok(Some(row)) = rows.next().await {
             let review_id: i64 = row.get(0)?;
             let patch_id: i64 = row.get(1)?;
@@ -3100,7 +3135,18 @@ impl Database {
             let summary: String = row.get(3).unwrap_or_default();
             let patch_message_id: String = row.get(4).unwrap_or_default();
             let index: i64 = row.get(5).unwrap_or_default();
+            temp_reviews.push((
+                review_id,
+                patch_id,
+                inline_review,
+                summary,
+                patch_message_id,
+                index,
+            ));
+        }
 
+        let mut reviews = Vec::new();
+        for (review_id, patch_id, inline_review, summary, patch_message_id, index) in temp_reviews {
             // Fetch findings for this review
             let mut findings_rows = self.conn.query(
                 "SELECT severity, problem, severity_explanation FROM findings WHERE review_id = ?",

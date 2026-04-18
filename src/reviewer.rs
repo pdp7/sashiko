@@ -1214,7 +1214,6 @@ impl Reviewer {
 
                                 let inline_review = json_output["inline_review"].as_str();
 
-                                let _ = ctx.db.begin_transaction().await;
                                 let mut db_success = true;
 
                                 if let Err(e) = ctx
@@ -1286,10 +1285,7 @@ impl Reviewer {
                                     }
                                 }
                                 if db_success {
-                                    let _ = ctx.db.commit_transaction().await;
                                     let _ = ctx.db.update_patch_status(patch_id, "Reviewed").await;
-                                } else {
-                                    let _ = ctx.db.conn.execute("ROLLBACK", ()).await;
                                 }
                                 return Ok(PatchResult::Success);
                             } else if ctx.settings.ai.no_ai {
@@ -1826,16 +1822,19 @@ impl Reviewer {
         findings: Option<&Vec<Value>>,
         _summary: &str,
     ) -> Result<()> {
-        let mut rows = ctx
-            .db
-            .conn
-            .query(
-                "SELECT 1 FROM email_outbox WHERE patch_id = ?",
-                libsql::params![patch_id],
-            )
-            .await?;
+        let already_processed = {
+            let mut rows = ctx
+                .db
+                .conn
+                .query(
+                    "SELECT 1 FROM email_outbox WHERE patch_id = ?",
+                    libsql::params![patch_id],
+                )
+                .await?;
+            matches!(rows.next().await, Ok(Some(_)))
+        };
 
-        if let Ok(Some(_)) = rows.next().await {
+        if already_processed {
             info!(
                 "Notification already processed for patch_id {}, skipping.",
                 patch_id
