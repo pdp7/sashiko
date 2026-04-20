@@ -6,6 +6,8 @@
 
 Sashiko is an agentic Linux kernel code review system. It uses a set Linux kernel-specific prompts and a special protocol to review proposed Linux kernel changes. Sashiko can ingest patches from mailing lists or local git. It's fully self contained (doesn't use any external agentic cli tools) and can work with various LLM providers.
 
+If you are a kernel maintainer, please see our [Guide for Kernel Maintainers](MAINTAINERS_GUIDE.md) for information on interacting with Sashiko.
+
 ## Quality of reviews
 
 Sashiko is not perfect, but in our measurements the quality of reviews is high:
