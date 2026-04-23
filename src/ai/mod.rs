@@ -189,23 +189,20 @@ pub fn create_provider(settings: &Settings) -> Result<Arc<dyn AiProvider>> {
                 .map(|c| c.prompt_caching)
                 .unwrap_or(true); // Default to enabled
             let claude = settings.ai.claude.as_ref();
-            let max_tokens = claude
-                .map(|c| c.max_tokens)
-                .unwrap_or(4096);
+            let max_tokens = claude.map(|c| c.max_tokens).unwrap_or(4096);
             let base_url = claude
                 .and_then(|c| c.base_url.clone())
-                .unwrap_or_else(|| {
-                    claude::ClaudeClient::default_base_url()
-                });
+                .unwrap_or_else(claude::ClaudeClient::default_base_url);
             let thinking = claude.and_then(|c| c.thinking.clone());
             let effort = claude.and_then(|c| c.effort.clone());
             Ok(Arc::new(claude::ClaudeClient::new(
-                        model,
-                        enable_caching,
-                        max_tokens,
-                        base_url,
-                        thinking,
-                        effort,)))
+                model,
+                enable_caching,
+                max_tokens,
+                base_url,
+                thinking,
+                effort,
+            )))
         }
         "stdio-claude" => Ok(Arc::new(claude::StdioClaudeClient)),
         #[cfg(feature = "bedrock")]

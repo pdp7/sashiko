@@ -21,10 +21,8 @@ jobs:
           python-version: '3.14.3'
       - name: Install yamllint
         run: pip install yamllint
-      - name: Setup Just
-        uses: extractions/setup-just@v4
-      - name: Run Linters via Justfile
-        run: just lint
+      - name: Run Linters via Makefile
+        run: make lint
       - name: Upload Binaries
         uses: actions/upload-artifact@v7
         with:

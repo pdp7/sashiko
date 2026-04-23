@@ -35,6 +35,5 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
-      - uses: extractions/setup-just@v4
       - name: Run Integration Test
-        run: just integration-test
+        run: make integration-test

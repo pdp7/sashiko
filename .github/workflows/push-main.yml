@@ -11,8 +11,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Setup Just
-        uses: extractions/setup-just@v4
       - name: Check Developer Certificate of Origin (S-O-B)
         run: |
           BEFORE="${{ github.event.before }}"
@@ -23,7 +21,7 @@ jobs:
           else
             RANGE="$BEFORE..$AFTER"
           fi
-          just sob "$RANGE"
+          make sob RANGE="$RANGE"
   lint:
     needs: check-sob
     uses: ./.github/workflows/linting.yml

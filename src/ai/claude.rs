@@ -155,12 +155,13 @@ pub struct ClaudeClient {
 }
 
 impl ClaudeClient {
-    pub fn new(model: String,
-               enable_caching: bool,
-               max_tokens: u32,
-               base_url: String,
-               thinking: Option<String>,
-               effort: Option<String>,
+    pub fn new(
+        model: String,
+        enable_caching: bool,
+        max_tokens: u32,
+        base_url: String,
+        thinking: Option<String>,
+        effort: Option<String>,
     ) -> Self {
         let api_key = std::env::var("ANTHROPIC_API_KEY")
             .or_else(|_| std::env::var("LLM_API_KEY"))
@@ -263,11 +264,13 @@ impl ClaudeClient {
 
 // --- Translation Functions ---
 
-fn translate_ai_request(request: &AiRequest,
-                        enable_caching: bool,
-                        max_tokens: u32,
-                        thinking: Option<String>,
-                        effort: Option<String>) -> Result<ClaudeRequest> {
+fn translate_ai_request(
+    request: &AiRequest,
+    enable_caching: bool,
+    max_tokens: u32,
+    thinking: Option<String>,
+    effort: Option<String>,
+) -> Result<ClaudeRequest> {
     let mut messages = Vec::new();
     let mut system_blocks = Vec::new();
 
@@ -374,9 +377,9 @@ fn translate_ai_request(request: &AiRequest,
     let mut claude_request = ClaudeRequest {
         model: String::new(), // Will be set by the client
         messages,
-        max_tokens: max_tokens,
-        thinking: thinking,
-        effort: effort,
+        max_tokens,
+        thinking,
+        effort,
         system: if system_blocks.is_empty() {
             None
         } else {
@@ -501,11 +504,13 @@ fn estimate_tokens_generic(request: &AiRequest) -> usize {
 impl AiProvider for ClaudeClient {
     async fn generate_content(&self, request: AiRequest) -> Result<AiResponse> {
         // 1. Translate generic request to Claude format
-        let mut claude_req = translate_ai_request(&request,
-                                                  self.enable_caching,
-                                                  self.max_tokens,
-                                                  self.thinking.clone(),
-                                                  self.effort.clone())?;
+        let mut claude_req = translate_ai_request(
+            &request,
+            self.enable_caching,
+            self.max_tokens,
+            self.thinking.clone(),
+            self.effort.clone(),
+        )?;
 
         // 2. Set the model
         claude_req.model = self.model.clone();

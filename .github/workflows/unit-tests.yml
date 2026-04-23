@@ -20,7 +20,5 @@ jobs:
           path: target/release
       - name: Fix Permissions
         run: chmod +x target/release/*
-      - name: Setup Just
-        uses: extractions/setup-just@v4
-      - name: Run cargo-test via Justfile
-        run: just test
+      - name: Run cargo-test via Makefile
+        run: make test

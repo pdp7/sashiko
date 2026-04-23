@@ -49,6 +49,6 @@ int main() {
     let (start, end) = file_ranges[0];
     let block = extract_enclosing_block(source_code, start, end).unwrap();
 
-    assert!(block.starts_with("void dmem_cgroup_unregister_region("));
-    assert!(block.ends_with("mutex_unlock(&dmem_cgroup_mutex);\n}"));
+    assert!(block.0.starts_with("void dmem_cgroup_unregister_region("));
+    assert!(block.0.ends_with("mutex_unlock(&dmem_cgroup_mutex);\n}"));
 }

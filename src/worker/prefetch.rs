@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use anyhow::Result;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -769,16 +771,14 @@ fn extract_called_functions(source_code: &str, diff_ranges: &[(usize, usize)]) -
         if node.kind() == "call_expression" {
             let row = node.start_position().row;
             let in_diff = diff_ranges.iter().any(|&(s, e)| row >= s && row <= e);
-            if in_diff {
-                if let Some(func) = node.child_by_field_name("function") {
-                    // Skip field_expression (e.g. obj->method) — only direct calls.
-                    if func.kind() == "identifier" {
-                        if let Ok(name) = func.utf8_text(source) {
-                            if name.len() >= 3 && !is_common_c_word(name) {
-                                out.insert(name.to_string());
-                            }
-                        }
-                    }
+            if in_diff && let Some(func) = node.child_by_field_name("function") {
+                // Skip field_expression (e.g. obj->method) — only direct calls.
+                if func.kind() == "identifier"
+                    && let Ok(name) = func.utf8_text(source)
+                    && name.len() >= 3
+                    && !is_common_c_word(name)
+                {
+                    out.insert(name.to_string());
                 }
             }
         }
@@ -839,10 +839,10 @@ pub fn extract_type_names(
     };
 
     fn walk(n: Node<'_>, src: &[u8], out: &mut HashSet<String>, bounds: Option<(usize, usize)>) {
-        if let Some((lo, hi)) = bounds {
-            if n.end_position().row < lo || n.start_position().row > hi {
-                return;
-            }
+        if let Some((lo, hi)) = bounds
+            && (n.end_position().row < lo || n.start_position().row > hi)
+        {
+            return;
         }
         if n.kind() == "type_identifier"
             && let Ok(text) = n.utf8_text(src)

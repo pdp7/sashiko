@@ -7,7 +7,7 @@ You're an expert Software Engineer with deep knowledge of Rust, Distributed Syst
 - Make sure no lines in the commit message exceed 72 characters. Hard-wrap the commit message body to enforce this length.
 - **Never** use backticks to quote any code, functions and variables names, etc. in the commit message.
 - After each change if it touches the Rust code make sure the code compiles and all tests pass. Never start a new task with non-clean git status. Clear the context between tasks.
-- Make sure to not commit any logs or temporary files. NEVER commit before running `cargo fmt` and `cargo clippy`.
+- Make sure to not commit any logs or temporary files. NEVER commit before running `make check-pr` to ensure CI/CD checks pass.
 - Once the task is done, no local changes should remain. Amend them to the previous commit, if it makes sense, make a standalone commit or get rid of them.
 - Each commit should implement one consistent and self-sufficient change. Never create commits like "do X and Y", create 2 commits instead.
 - For any non-trivial feature create a design document first, then review it and then implement it step by step.
